@@ -1,0 +1,17 @@
+[package]
+name = "r2"
+version = "0.1.0"
+authors = ["nicola <nicola@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+memmap = "0.7"
+chrono = "0.4"
+tempfile = "3"
+storage-proofs = "0.3.0"
+blake2s_simd = "0.5"
+paired = { version = "0.15", features = ["serde"] }
+ff = "0.4.0"
+hex = "0.3.2"

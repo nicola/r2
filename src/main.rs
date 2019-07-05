@@ -61,8 +61,12 @@ where
     G: Graph<H>,
 {
     for l in 0..LAYERS {
-        println!("Replica {}", l);
+        println!("Replica {} starting", l);
         let replica = r(g, replica_id, l, data);
+        println!("Replica {} done", l);
+        if let Ok(_) = replica {
+            println!("replica is correct!");
+        }
     }
 }
 

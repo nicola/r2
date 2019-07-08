@@ -17,7 +17,7 @@ use tempfile;
 
 // mod graph;
 
-const DATA_SIZE: usize = 1 * 1024 * 1024;
+const DATA_SIZE: usize = 1024 * 1024 * 1024;
 const NODE_SIZE: usize = 32;
 const LAYERS: usize = 10;
 const NODES: usize = DATA_SIZE / NODE_SIZE;
@@ -58,11 +58,12 @@ where
 fn r2<'a, G, H>(replica_id: &'a H::Domain, data: &'a mut [u8], g: &'a G)
 where
     H: Hasher,
-    G: Graph<H>,
+    G: ZigZag + Graph<H>,
 {
     for l in 0..LAYERS {
         println!("Replica {} starting", l);
         let replica = r(g, replica_id, l, data);
+        g.zigzag();
         println!("Replica {} done", l);
         if let Ok(_) = replica {
             println!("replica is correct!");

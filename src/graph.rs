@@ -155,7 +155,7 @@ impl Graph {
 
             // Expander parents
             exp_parents = &self.exp[node];
-            parents[self.base_degree..self.base_degree + exp_parents.len()]
+            parents[base_parents.len()..base_parents.len() + exp_parents.len()]
                 .copy_from_slice(exp_parents);
         } else {
             // DRG parents
@@ -173,15 +173,14 @@ impl Graph {
             // On an odd layer, reverse the edges:
             // A->B is now B->A
             exp_parents = &self.exp_reversed[node];
-            parents[self.base_degree..self.base_degree + exp_parents.len()]
+            parents[base_parents.len()..base_parents.len() + exp_parents.len()]
                 .copy_from_slice(&exp_parents);
+
+            println!("printing {} {:?}", &node, &exp_parents);
         }
 
         // Adding needed padding only
-        for i in base_parents.len()..self.base_degree {
-            parents[i] = 0;
-        }
-        for i in exp_parents.len() + self.base_degree..self.degree() {
+        for i in base_parents.len() + exp_parents.len()..self.degree() {
             parents[i] = 0;
         }
     }

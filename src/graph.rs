@@ -175,8 +175,6 @@ impl Graph {
             exp_parents = &self.exp_reversed[node];
             parents[base_parents.len()..base_parents.len() + exp_parents.len()]
                 .copy_from_slice(&exp_parents);
-
-            println!("printing {} {:?}", &node, &exp_parents);
         }
 
         // Adding needed padding only

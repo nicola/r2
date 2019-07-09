@@ -4,7 +4,8 @@ use ff::Field;
 use memmap::{MmapMut, MmapOptions};
 use paired::bls12_381::{Bls12, Fr, FrRepr};
 use paired::Engine;
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions,};
+use std::io::{Write, Read};
 use storage_proofs::drgraph::new_seed;
 use storage_proofs::drgraph::Graph;
 use storage_proofs::error::Result;
@@ -15,9 +16,9 @@ use storage_proofs::vde::create_key;
 use storage_proofs::zigzag_graph::{ZigZag, ZigZagBucketGraph};
 use tempfile;
 
-// mod graph;
+mod graph;
 
-const DATA_SIZE: usize = 1024 * 1024 * 1024;
+const DATA_SIZE: usize = 1 * 1024 * 1024;
 const NODE_SIZE: usize = 32;
 const LAYERS: usize = 10;
 const NODES: usize = DATA_SIZE / NODE_SIZE;
@@ -96,11 +97,27 @@ pub fn id_from_str<T: Domain>(raw: &str) -> T {
     T::try_from_bytes(&replica_id_bytes).expect("invalid replica id")
 }
 
+fn load_parents() -> Vec<Vec<usize>> {
+    let mut file = File::open("bas.vec").expect("unable to open");
+
+    let mut data : Vec<Vec<usize>> = Vec::new();
+    file.read_to_end(&mut data).expect("unable to parse");
+
+    return data;
+}
+
 fn main() {
     let g = ZigZagBucketGraph::<Blake2sHasher>::new_zigzag(NODES, 5, 8, new_seed());
     let replica_id = id_from_str::<<Blake2sHasher as Hasher>::Domain>("aaaa");
     let use_tmp = true;
     let mut data = file_backed_mmap_from_zeroes(NODES, use_tmp);
     println!("Starting replication");
-    r2(&replica_id, &mut data, &g)
+    // r2(&replica_id, &mut data, &g)
+
+    let gg = graph::Graph::new(NODES, BASE_PARENTS, EXP_PARENTS, new_seed());
+    let (bas, exp) = gg.gen_parents_cache();
+    let mut f_bas = File::create("bas.vec").expect("Unable to create file");
+    let mut f_exp = File::create("exp.vec").expect("Unable to create file");
+    write!(f_bas, "{:?}\n", bas);
+    write!(f_exp, "{:?}\n", exp);
 }

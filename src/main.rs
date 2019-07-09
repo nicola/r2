@@ -1,76 +1,20 @@
-use blake2s_simd::Params as Blake2s;
 use chrono::Utc;
-use ff::Field;
 use memmap::{MmapMut, MmapOptions};
-use paired::bls12_381::{Bls12, Fr, FrRepr};
-use paired::Engine;
-use std::fs::{File, OpenOptions,};
-use std::io::{Write, Read};
+use std::fs::{File, OpenOptions};
 use storage_proofs::drgraph::new_seed;
-use storage_proofs::drgraph::Graph;
-use storage_proofs::error::Result;
-use storage_proofs::fr32::bytes_into_fr_repr_safe;
 use storage_proofs::hasher::{Blake2sHasher, Domain, Hasher};
-use storage_proofs::util::{data_at_node, data_at_node_offset};
-use storage_proofs::vde::create_key;
-use storage_proofs::zigzag_graph::{ZigZag, ZigZagBucketGraph};
 use tempfile;
 
 mod graph;
+mod replicate;
 
-const DATA_SIZE: usize = 1 * 1024 * 1024;
-const NODE_SIZE: usize = 32;
-const LAYERS: usize = 10;
-const NODES: usize = DATA_SIZE / NODE_SIZE;
-const BASE_PARENTS: usize = 5;
-const EXP_PARENTS: usize = 8;
-const PARENT_SIZE: usize = BASE_PARENTS + EXP_PARENTS;
-
-fn r<'a, H, G>(
-    graph: &'a G,
-    replica_id: &'a H::Domain,
-    layer: usize,
-    data: &'a mut [u8],
-) -> Result<()>
-where
-    H: Hasher,
-    G: Graph<H>,
-{
-    let mut parents = vec![0; PARENT_SIZE];
-    for n in 0..NODES {
-        let node = if graph.forward() { n } else { (NODES - n) - 1 };
-        graph.parents(node, &mut parents);
-
-        let key = create_key::<H>(replica_id, node, &parents, data)?;
-        let start = data_at_node_offset(node);
-        let end = start + NODE_SIZE;
-
-        let node_data = H::Domain::try_from_bytes(&data[start..end])?;
-        let mut node_fr: Fr = node_data.into();
-        node_fr.add_assign(&key.into());
-        let encoded: H::Domain = node_fr.into();
-
-        encoded.write_bytes(&mut data[start..end])?;
-    }
-
-    Ok(())
-}
-
-fn r2<'a, G, H>(replica_id: &'a H::Domain, data: &'a mut [u8], g: &'a G)
-where
-    H: Hasher,
-    G: ZigZag + Graph<H>,
-{
-    for l in 0..LAYERS {
-        println!("Replica {} starting", l);
-        let replica = r(g, replica_id, l, data);
-        g.zigzag();
-        println!("Replica {} done", l);
-        if let Ok(_) = replica {
-            println!("replica is correct!");
-        }
-    }
-}
+pub const DATA_SIZE: usize = 1024 * 1024 * 1024;
+pub const NODE_SIZE: usize = 32;
+pub const LAYERS: usize = 10;
+pub const NODES: usize = DATA_SIZE / NODE_SIZE;
+pub const BASE_PARENTS: usize = 5;
+pub const EXP_PARENTS: usize = 8;
+pub const PARENT_SIZE: usize = BASE_PARENTS + EXP_PARENTS;
 
 fn file_backed_mmap_from_zeroes(n: usize, use_tmp: bool) -> MmapMut {
     let file: File = if use_tmp {
@@ -97,27 +41,12 @@ pub fn id_from_str<T: Domain>(raw: &str) -> T {
     T::try_from_bytes(&replica_id_bytes).expect("invalid replica id")
 }
 
-fn load_parents() -> Vec<Vec<usize>> {
-    let mut file = File::open("bas.vec").expect("unable to open");
-
-    let mut data : Vec<Vec<usize>> = Vec::new();
-    file.read_to_end(&mut data).expect("unable to parse");
-
-    return data;
-}
-
 fn main() {
-    let g = ZigZagBucketGraph::<Blake2sHasher>::new_zigzag(NODES, 5, 8, new_seed());
+    let gg = graph::Graph::new_cached(NODES, BASE_PARENTS, EXP_PARENTS, new_seed());
     let replica_id = id_from_str::<<Blake2sHasher as Hasher>::Domain>("aaaa");
     let use_tmp = true;
     let mut data = file_backed_mmap_from_zeroes(NODES, use_tmp);
     println!("Starting replication");
-    // r2(&replica_id, &mut data, &g)
 
-    let gg = graph::Graph::new(NODES, BASE_PARENTS, EXP_PARENTS, new_seed());
-    let (bas, exp) = gg.gen_parents_cache();
-    let mut f_bas = File::create("bas.vec").expect("Unable to create file");
-    let mut f_exp = File::create("exp.vec").expect("Unable to create file");
-    write!(f_bas, "{:?}\n", bas);
-    write!(f_exp, "{:?}\n", exp);
+    replicate::r2::<Blake2sHasher>(&replica_id, &mut data, &gg)
 }

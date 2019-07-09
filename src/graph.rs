@@ -1,12 +1,22 @@
-use rand::{ChaChaRng, OsRng, Rng, SeedableRng};
+use rand::{ChaChaRng, Rng, SeedableRng};
+use serde::{Deserialize, Serialize};
+use serde_json;
 use std::cmp;
+use std::fs::metadata;
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::Write;
 use storage_proofs::crypto::feistel;
 
+#[derive(Serialize, Deserialize)]
 pub struct Graph {
-    nodes: usize,
+    pub nodes: usize,
     base_degree: usize,
     expansion_degree: usize,
     seed: [u32; 7],
+    bas: Vec<Vec<usize>>,
+    exp: Vec<Vec<usize>>,
+    exp_reversed: Vec<Vec<usize>>,
 }
 
 fn bucketsample_parents(g: &Graph, node: usize) -> Vec<usize> {
@@ -90,29 +100,96 @@ impl Graph {
             base_degree,
             expansion_degree,
             seed,
+            exp: vec![],
+            bas: vec![],
+            exp_reversed: vec![vec![]; nodes],
+        }
+    }
+    pub fn new_cached(
+        nodes: usize,
+        base_degree: usize,
+        expander_parents: usize,
+        seed: [u32; 7],
+    ) -> Graph {
+        if let Err(_) = metadata("g.json") {
+            println!("Parents not cached, creating them");
+            let mut gg = Graph::new(nodes, base_degree, expander_parents, seed);
+            gg.gen_parents_cache();
+            let mut f = File::create("g.json").expect("Unable to create file");
+            let j = serde_json::to_string(&gg).expect("unable to create json");
+            write!(f, "{}\n", j).expect("Unable to write file");
+
+            gg
+        } else {
+            println!("Parents are cached, loading them");
+            let mut f = File::open("g.json").expect("Unable to open the file");
+            let mut json = String::new();
+            f.read_to_string(&mut json)
+                .expect("Unable to read the file");
+            let gg = serde_json::from_str::<Graph>(&json).expect("unable to parse json");
+            gg
         }
     }
 
-    pub fn gen_parents_cache(&self) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
-        let mut all_base_parents: Vec<Vec<usize>> = Vec::with_capacity(self.nodes);
-        let mut all_expansion_parents: Vec<Vec<usize>> = Vec::with_capacity(self.nodes);
+    pub fn parents(&self, node: usize, layer: usize, parents: &mut [usize]) {
+        let mut ps = vec![];
 
-        let feistel_precomputed =
-            feistel::precompute((self.expansion_degree * self.nodes) as feistel::Index);
+        let base_parents = {
+            if layer % 2 == 0 {
+                self.bas[node].clone()
+            } else {
+                let n = self.nodes - node - 1;
+                self.bas[n]
+                    .iter()
+                    .map(|x| self.nodes - x - 1)
+                    .collect::<Vec<usize>>()
+            }
+        };
 
-        // Forward parents
+        let exp_parents = {
+            if layer % 2 == 0 {
+                self.exp[node].clone()
+            } else {
+                self.exp_reversed[node].clone()
+            }
+        };
+
+        ps.extend(pad_parents(base_parents, 5));
+        ps.extend(pad_parents(exp_parents, 8));
+
+        assert_eq!(ps.len(), self.degree());
+
+        for (i, parent) in parents.iter_mut().enumerate() {
+            *parent = ps[i];
+        }
+    }
+
+    pub fn gen_parents_cache(&mut self) {
+        let fp = feistel::precompute((self.expansion_degree * self.nodes) as feistel::Index);
+
+        // Cache only forward DRG parents
         for node in 0..self.nodes {
-            // The parents of a node are the parents generated from BucketSample and the parents derived from the Bipartite Expander Graph
-            let base_parents = bucketsample_parents(&self, node);
-            let expanded_parents = expander_parents(&self, node, feistel_precomputed);
-            all_base_parents.push(base_parents);
-            all_expansion_parents.push(expanded_parents);
+            self.bas.push(bucketsample_parents(&self, node));
+            self.exp.push(expander_parents(&self, node, fp));
         }
 
-        (all_base_parents, all_expansion_parents)
+        // Cache reverse edges for exp
+        for (n1, v) in self.exp.iter().enumerate() {
+            for n2 in v {
+                self.exp_reversed[*n2].push(n1);
+            }
+        }
     }
 
-    fn degree(&self) -> usize {
+    pub fn degree(&self) -> usize {
         self.base_degree + self.expansion_degree
     }
+}
+
+fn pad_parents(mut v: Vec<usize>, size: usize) -> Vec<usize> {
+    if v.len() < size {
+        let diff = size - v.len();
+        v.extend(&vec![0; diff]);
+    }
+    v
 }

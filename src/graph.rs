@@ -144,40 +144,45 @@ impl Graph {
 
     /// Load the parents of a node from cache
     pub fn parents(&self, node: usize, layer: usize, parents: &mut [usize]) {
-        let mut ps = vec![];
+        let base_parents;
+        let exp_parents;
 
-        let base_parents = {
-            if layer % 2 == 0 {
-                self.bas[node].clone()
-            } else {
-                // On an odd layer, invert the graph:
-                // - given a node n, find the parents of nodes - n - 1
-                // - for each parent, return nodes - parent - 1
-                let n = self.nodes - node - 1;
-                self.bas[n]
-                    .iter()
-                    .map(|x| self.nodes - x - 1)
-                    .collect::<Vec<usize>>()
+        if layer % 2 == 0 {
+            // DRG Parents
+            base_parents = &self.bas[node];
+            // Copying base parents
+            parents[0..base_parents.len()].copy_from_slice(base_parents);
+
+            // Expander parents
+            exp_parents = &self.exp[node];
+            parents[self.base_degree..self.base_degree + exp_parents.len()]
+                .copy_from_slice(exp_parents);
+        } else {
+            // DRG parents
+            // On an odd layer, invert the graph:
+            // - given a node n, find the parents of nodes - n - 1
+            // - for each parent, return nodes - parent - 1
+            let n = self.nodes - node - 1;
+            base_parents = &self.bas[n];
+            // Copying base parents
+            for (i, v) in base_parents.iter().enumerate() {
+                parents[i] = self.nodes - v - 1;
             }
-        };
 
-        let exp_parents = {
-            if layer % 2 == 0 {
-                self.exp[node].clone()
-            } else {
-                // On an odd layer, reverse the edges:
-                // A->B is now B->A
-                self.exp_reversed[node].clone()
-            }
-        };
+            // Expander parents
+            // On an odd layer, reverse the edges:
+            // A->B is now B->A
+            exp_parents = &self.exp_reversed[node];
+            parents[self.base_degree..self.base_degree + exp_parents.len()]
+                .copy_from_slice(&exp_parents);
+        }
 
-        // Pad the parents, the size of the total parents must be `PARENTS_SIZE`
-        ps.extend(pad_parents(base_parents, self.base_degree));
-        ps.extend(pad_parents(exp_parents, self.expansion_degree));
-        assert_eq!(ps.len(), self.degree());
-
-        for (i, parent) in parents.iter_mut().enumerate() {
-            *parent = ps[i];
+        // Adding needed padding only
+        for i in base_parents.len()..self.base_degree {
+            parents[i] = 0;
+        }
+        for i in exp_parents.len() + self.base_degree..self.degree() {
+            parents[i] = 0;
         }
     }
 
@@ -205,10 +210,9 @@ impl Graph {
     }
 }
 
-fn pad_parents(mut v: Vec<usize>, size: usize) -> Vec<usize> {
+fn pad_parents(v: &mut Vec<usize>, size: usize) {
     if v.len() < size {
         let diff = size - v.len();
-        v.extend(&vec![0; diff]);
+        v.resize(diff, 0);
     }
-    v
 }

@@ -100,8 +100,8 @@ impl Graph {
             base_degree,
             expansion_degree,
             seed,
-            exp: vec![],
-            bas: vec![],
+            exp: vec![vec![]; nodes],
+            bas: vec![vec![]; nodes],
             exp_reversed: vec![vec![]; nodes],
         }
     }
@@ -169,8 +169,8 @@ impl Graph {
 
         // Cache only forward DRG parents
         for node in 0..self.nodes {
-            self.bas.push(bucketsample_parents(&self, node));
-            self.exp.push(expander_parents(&self, node, fp));
+            self.bas[node] = bucketsample_parents(&self, node);
+            self.exp[node] = expander_parents(&self, node, fp);
         }
 
         // Cache reverse edges for exp

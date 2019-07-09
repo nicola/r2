@@ -206,10 +206,3 @@ impl Graph {
         self.base_degree + self.expansion_degree
     }
 }
-
-fn pad_parents(v: &mut Vec<usize>, size: usize) {
-    if v.len() < size {
-        let diff = size - v.len();
-        v.resize(diff, 0);
-    }
-}

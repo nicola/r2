@@ -8,14 +8,22 @@ use tempfile;
 mod graph;
 mod replicate;
 
-pub const DATA_SIZE: usize = 1024 * 1024 * 1024;
+/// Size of the data to encode
+pub const DATA_SIZE: usize = 1 * 1024 * 1024;
+/// Size of each node in the graph
 pub const NODE_SIZE: usize = 32;
+/// Number of layers in ZigZag
 pub const LAYERS: usize = 10;
+/// Number of nodes in each layer DRG graph
 pub const NODES: usize = DATA_SIZE / NODE_SIZE;
+/// In-degree of the DRG graph
 pub const BASE_PARENTS: usize = 5;
+/// Degree of the Expander graph
 pub const EXP_PARENTS: usize = 8;
+/// Number of parents for each node in the graph
 pub const PARENT_SIZE: usize = BASE_PARENTS + EXP_PARENTS;
 
+/// Generate a tmp file full of zeros
 fn file_backed_mmap_from_zeroes(n: usize, use_tmp: bool) -> MmapMut {
     let file: File = if use_tmp {
         tempfile::tempfile().unwrap()
@@ -33,6 +41,7 @@ fn file_backed_mmap_from_zeroes(n: usize, use_tmp: bool) -> MmapMut {
     unsafe { MmapOptions::new().map_mut(&file).unwrap() }
 }
 
+/// Compute replica id from string
 pub fn id_from_str<T: Domain>(raw: &str) -> T {
     let replica_id_raw = hex::decode(raw).expect("invalid hex for replica id seed");
     let mut replica_id_bytes = vec![0u8; 32];
@@ -42,11 +51,13 @@ pub fn id_from_str<T: Domain>(raw: &str) -> T {
 }
 
 fn main() {
+    // Load the graph from memory or generate a new one
     let gg = graph::Graph::new_cached(NODES, BASE_PARENTS, EXP_PARENTS, new_seed());
+    // Compute replica_id
     let replica_id = id_from_str::<<Blake2sHasher as Hasher>::Domain>("aaaa");
-    let use_tmp = true;
-    let mut data = file_backed_mmap_from_zeroes(NODES, use_tmp);
+    // Generate a file full of zeroes to be replicated
+    let mut data = file_backed_mmap_from_zeroes(NODES, true);
+    // Start replication
     println!("Starting replication");
-
     replicate::r2::<Blake2sHasher>(&replica_id, &mut data, &gg)
 }

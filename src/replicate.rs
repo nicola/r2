@@ -9,20 +9,24 @@ use crate::graph;
 use crate::LAYERS;
 use crate::NODE_SIZE;
 
+/// Generates a ZigZag replicated sector
 pub fn r2<'a, H>(replica_id: &'a H::Domain, data: &'a mut [u8], g: &'a graph::Graph)
 where
     H: Hasher,
 {
+    // Generate a replica at each layer
     for l in 0..LAYERS {
         println!("Replica {} starting", l);
         let replica = r::<H>(g, replica_id, l, data);
         println!("Replica {} done", l);
+
         if let Ok(_) = replica {
             println!("replica is correct!");
         }
     }
 }
 
+/// Encoding of a single layer
 pub fn r<'a, H>(
     graph: &'a graph::Graph,
     replica_id: &'a H::Domain,
@@ -33,23 +37,24 @@ where
     H: Hasher,
 {
     let mut parents = vec![0; graph.degree()];
-    for n in 0..graph.nodes {
-        let node = if layer % 2 == 0 {
-            n
-        } else {
-            (graph.nodes - n) - 1
-        };
+    for node in 0..graph.nodes {
+        // Get the `parents`
         graph.parents(node, layer, &mut parents);
 
+        // Compute `key` from `parents`
         let key = create_key::<H>(replica_id, node, &parents, data)?;
+
+        // Get the `unencoded` node
         let start = data_at_node_offset(node);
         let end = start + NODE_SIZE;
-
         let node_data = H::Domain::try_from_bytes(&data[start..end])?;
         let mut node_fr: Fr = node_data.into();
+
+        // Compute the `encoded` node by adding the `key` to it
         node_fr.add_assign(&key.into());
         let encoded: H::Domain = node_fr.into();
 
+        // Store the `encoded` data
         encoded.write_bytes(&mut data[start..end])?;
     }
 

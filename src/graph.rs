@@ -8,6 +8,7 @@ use std::io::prelude::*;
 use std::io::Write;
 use storage_proofs::crypto::feistel;
 
+/// A Graph holds settings and cache
 #[derive(Serialize, Deserialize)]
 pub struct Graph {
     pub nodes: usize,
@@ -19,6 +20,7 @@ pub struct Graph {
     exp_reversed: Vec<Vec<usize>>,
 }
 
+/// Given a node and a graph, find the parents of a node DRG graph
 fn bucketsample_parents(g: &Graph, node: usize) -> Vec<usize> {
     let m = g.base_degree;
     let mut parents = [0; 5];
@@ -68,12 +70,18 @@ fn bucketsample_parents(g: &Graph, node: usize) -> Vec<usize> {
     parents.to_vec()
 }
 
+/// Given a node and a graph (and feistel settings) generate the expander
+/// graph parents on a node in a layer in ZigZag.
 fn expander_parents(
     g: &Graph,
     node: usize,
     feistel_precomputed: feistel::FeistelPrecomputed,
 ) -> Vec<usize> {
+    // Set the Feistel permutation keys
     let feistel_keys = &[1, 2, 3, 4];
+
+    // The expander graph parents are calculated by computing 3 rounds of the
+    // feistel permutation on the current node
     let parents: Vec<usize> = (0..g.expansion_degree)
         .filter_map(|i| {
             let parent = feistel::invert_permute(
@@ -94,6 +102,7 @@ fn expander_parents(
 }
 
 impl Graph {
+    /// Create a graph
     pub fn new(nodes: usize, base_degree: usize, expansion_degree: usize, seed: [u32; 7]) -> Self {
         Graph {
             nodes,
@@ -105,6 +114,8 @@ impl Graph {
             exp_reversed: vec![vec![]; nodes],
         }
     }
+    // Create a graph, generate its parents and cache them.
+    // Parents are cached in a JSON file
     pub fn new_cached(
         nodes: usize,
         base_degree: usize,
@@ -131,6 +142,7 @@ impl Graph {
         }
     }
 
+    /// Load the parents of a node from cache
     pub fn parents(&self, node: usize, layer: usize, parents: &mut [usize]) {
         let mut ps = vec![];
 
@@ -138,6 +150,9 @@ impl Graph {
             if layer % 2 == 0 {
                 self.bas[node].clone()
             } else {
+                // On an odd layer, invert the graph:
+                // - given a node n, find the parents of nodes - n - 1
+                // - for each parent, return nodes - parent - 1
                 let n = self.nodes - node - 1;
                 self.bas[n]
                     .iter()
@@ -150,13 +165,15 @@ impl Graph {
             if layer % 2 == 0 {
                 self.exp[node].clone()
             } else {
+                // On an odd layer, reverse the edges:
+                // A->B is now B->A
                 self.exp_reversed[node].clone()
             }
         };
 
-        ps.extend(pad_parents(base_parents, 5));
-        ps.extend(pad_parents(exp_parents, 8));
-
+        // Pad the parents, the size of the total parents must be `PARENTS_SIZE`
+        ps.extend(pad_parents(base_parents, self.base_degree));
+        ps.extend(pad_parents(exp_parents, self.expansion_degree));
         assert_eq!(ps.len(), self.degree());
 
         for (i, parent) in parents.iter_mut().enumerate() {
@@ -167,7 +184,7 @@ impl Graph {
     pub fn gen_parents_cache(&mut self) {
         let fp = feistel::precompute((self.expansion_degree * self.nodes) as feistel::Index);
 
-        // Cache only forward DRG parents
+        // Cache only forward DRG and Expander parents
         for node in 0..self.nodes {
             self.bas[node] = bucketsample_parents(&self, node);
             self.exp[node] = expander_parents(&self, node, fp);
@@ -179,6 +196,8 @@ impl Graph {
                 self.exp_reversed[*n2].push(n1);
             }
         }
+
+        // TODO: sort parents
     }
 
     pub fn degree(&self) -> usize {

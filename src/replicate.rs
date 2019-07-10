@@ -1,9 +1,10 @@
+use blake2s_simd::Params as Blake2s;
 use ff::Field;
 use paired::bls12_381::Fr;
 use storage_proofs::error::Result;
+use storage_proofs::fr32::bytes_into_fr_repr_safe;
 use storage_proofs::hasher::{Domain, Hasher};
 use storage_proofs::util::data_at_node_offset;
-use storage_proofs::vde::create_key;
 
 use crate::graph;
 use crate::LAYERS;
@@ -37,10 +38,6 @@ where
     H: Hasher,
 {
     // Optimization
-    // instead of allocating a new vector memory every time, re-use this one
-    let mut parents = vec![0; graph.degree()];
-
-    // Optimization
     // instead of checking the parity of the layer per node,
     // check that per layer.
     let get_parents = {
@@ -53,10 +50,10 @@ where
 
     for node in 0..graph.nodes {
         // Get the `parents`
-        get_parents(&graph, node, &mut parents);
+        let parents = get_parents(&graph, node);
 
         // Compute `key` from `parents`
-        let key = create_key::<H>(replica_id, node, &parents, data)?;
+        let key = create_key::<H, _>(replica_id, node, parents, data)?;
 
         // Get the `unencoded` node
         let start = data_at_node_offset(node);
@@ -73,4 +70,30 @@ where
     }
 
     Ok(())
+}
+
+pub fn create_key<H: Hasher, I>(
+    id: &H::Domain,
+    node: usize,
+    parents: I,
+    data: &[u8],
+) -> Result<H::Domain>
+where
+    I: IntoIterator<Item = usize>,
+{
+    let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
+    hasher.update(id.as_ref());
+
+    let mut parents = parents.into_iter();
+
+    // The hash is about the parents, hence skip if a node doesn't have any parents
+    if node != parents.next().unwrap() {
+        for parent in parents {
+            let offset = data_at_node_offset(parent);
+            hasher.update(&data[offset..offset + NODE_SIZE]);
+        }
+    }
+
+    let hash = hasher.finalize();
+    Ok(bytes_into_fr_repr_safe(hash.as_ref()).into())
 }

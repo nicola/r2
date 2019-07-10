@@ -36,6 +36,11 @@ pub fn r<'a, H>(
 where
     H: Hasher,
 {
+    // Optimization
+    // instead of allocating a new vector memory every time, re-use this one
+    let mut parents = vec![0; graph.degree()];
+
+    // Optimization
     // instead of checking the parity of the layer per node,
     // check that per layer.
     let get_parents = {
@@ -46,7 +51,6 @@ where
         }
     };
 
-    let mut parents = vec![0; graph.degree()];
     for node in 0..graph.nodes {
         // Get the `parents`
         get_parents(&graph, node, &mut parents);

@@ -142,7 +142,8 @@ impl Graph {
         }
     }
 
-    pub fn parents_odd(&self, node: usize) -> ParentsIter<'_> {
+    #[inline]
+    pub fn parents_odd(&self, node: usize) -> ParentsIterRev<'_> {
         // DRG parents
         // On an odd layer, invert the graph:
         // - given a node n, find the parents of nodes - n - 1
@@ -155,16 +156,17 @@ impl Graph {
         // A->B is now B->A
         let exp_parents = &self.exp_reversed[node];
 
-        ParentsIter {
+        ParentsIterRev {
             graph: self,
             base_parents,
             exp_parents,
             index: 0,
-            reverse: Some(self.nodes),
+            nodes: self.nodes,
         }
     }
 
     /// Load the parents of a node from cache
+    #[inline]
     pub fn parents_even(&self, node: usize) -> ParentsIter<'_> {
         let base_parents = &self.bas[node];
         let exp_parents = &self.exp[node];
@@ -174,7 +176,6 @@ impl Graph {
             base_parents,
             exp_parents,
             index: 0,
-            reverse: None,
         }
     }
 
@@ -202,17 +203,18 @@ impl Graph {
     }
 }
 
-pub struct ParentsIter<'a> {
+pub struct ParentsIterRev<'a> {
     graph: &'a Graph,
     base_parents: &'a [usize],
     exp_parents: &'a [usize],
     index: usize,
-    reverse: Option<usize>,
+    nodes: usize,
 }
 
-impl<'a> Iterator for ParentsIter<'a> {
+impl<'a> Iterator for ParentsIterRev<'a> {
     type Item = usize;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.index > self.graph.degree() {
             // already exhausted
@@ -221,11 +223,7 @@ impl<'a> Iterator for ParentsIter<'a> {
 
         // base parents
         if self.index < self.base_parents.len() {
-            let res = if let Some(nodes) = self.reverse {
-                nodes - self.base_parents[self.index] - 1
-            } else {
-                self.base_parents[self.index]
-            };
+            let res = self.nodes - self.base_parents[self.index] - 1;
             self.index += 1;
             return Some(res);
         }
@@ -246,5 +244,60 @@ impl<'a> Iterator for ParentsIter<'a> {
         // Padding after expansion parents
         self.index += 1;
         return Some(0);
+    }
+}
+
+pub struct ParentsIter<'a> {
+    graph: &'a Graph,
+    base_parents: &'a [usize],
+    exp_parents: &'a [usize],
+    index: usize,
+}
+
+impl<'a> Iterator for ParentsIter<'a> {
+    type Item = usize;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index > self.graph.degree() {
+            // already exhausted
+            return None;
+        }
+
+        // base parents
+        if self.index < self.base_parents.len() {
+            let res = self.base_parents[self.index];
+            self.index += 1;
+            return Some(res);
+        }
+
+        // padding after base parents
+        if self.index < self.graph.base_degree {
+            self.index += 1;
+            return Some(0);
+        }
+
+        // expansion parents
+        if self.index < self.graph.base_degree + self.exp_parents.len() {
+            let res = self.exp_parents[self.index - self.graph.base_degree];
+            self.index += 1;
+            return Some(res);
+        }
+
+        // Padding after expansion parents
+        self.index += 1;
+        return Some(0);
+    }
+}
+
+impl<'a> ExactSizeIterator for ParentsIter<'a> {
+    fn len(&self) -> usize {
+        self.graph.degree()
+    }
+}
+
+impl<'a> ExactSizeIterator for ParentsIterRev<'a> {
+    fn len(&self) -> usize {
+        self.graph.degree()
     }
 }

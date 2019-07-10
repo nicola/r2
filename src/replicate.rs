@@ -40,18 +40,24 @@ where
     // Optimization
     // instead of checking the parity of the layer per node,
     // check that per layer.
-    let get_parents = {
-        if layer % 2 == 0 {
-            graph::Graph::parents_even
-        } else {
-            graph::Graph::parents_odd
-        }
-    };
 
+    if layer % 2 == 0 {
+        r_even::<H>(graph, replica_id, data)
+    } else {
+        r_odd::<H>(graph, replica_id, data)
+    }
+}
+
+pub fn r_even<'a, H>(
+    graph: &'a graph::Graph,
+    replica_id: &'a H::Domain,
+    data: &'a mut [u8],
+) -> Result<()>
+where
+    H: Hasher,
+{
     for node in 0..graph.nodes {
-        // Get the `parents`
-        let parents = get_parents(&graph, node);
-
+        let parents = graph::Graph::parents_even(graph, node);
         // Compute `key` from `parents`
         let key = create_key::<H, _>(replica_id, node, parents, data)?;
 
@@ -72,6 +78,37 @@ where
     Ok(())
 }
 
+pub fn r_odd<'a, H>(
+    graph: &'a graph::Graph,
+    replica_id: &'a H::Domain,
+    data: &'a mut [u8],
+) -> Result<()>
+where
+    H: Hasher,
+{
+    for node in 0..graph.nodes {
+        let parents = graph::Graph::parents_odd(graph, node);
+        // Compute `key` from `parents`
+        let key = create_key::<H, _>(replica_id, node, parents, data)?;
+
+        // Get the `unencoded` node
+        let start = data_at_node_offset(node);
+        let end = start + NODE_SIZE;
+        let node_data = H::Domain::try_from_bytes(&data[start..end])?;
+        let mut node_fr: Fr = node_data.into();
+
+        // Compute the `encoded` node by adding the `key` to it
+        node_fr.add_assign(&key.into());
+        let encoded: H::Domain = node_fr.into();
+
+        // Store the `encoded` data
+        encoded.write_bytes(&mut data[start..end])?;
+    }
+
+    Ok(())
+}
+
+#[inline]
 pub fn create_key<H: Hasher, I>(
     id: &H::Domain,
     node: usize,
@@ -88,8 +125,8 @@ where
 
     // The hash is about the parents, hence skip if a node doesn't have any parents
     if node != parents.next().unwrap() {
-        for parent in parents {
-            let offset = data_at_node_offset(parent);
+        for node in parents {
+            let offset = data_at_node_offset(node);
             hasher.update(&data[offset..offset + NODE_SIZE]);
         }
     }

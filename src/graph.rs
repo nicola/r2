@@ -14,6 +14,7 @@ pub struct Graph {
     pub nodes: usize,
     base_degree: usize,
     expansion_degree: usize,
+    pub degree: usize,
     seed: [u32; 7],
     pub bas: Vec<Vec<usize>>,
     pub exp: Vec<Vec<usize>>,
@@ -108,6 +109,7 @@ impl Graph {
             nodes,
             base_degree,
             expansion_degree,
+            degree: base_degree + expansion_degree,
             seed,
             exp: vec![vec![]; nodes],
             bas: vec![vec![]; nodes],
@@ -197,10 +199,6 @@ impl Graph {
 
         // TODO: sort parents
     }
-
-    pub fn degree(&self) -> usize {
-        self.base_degree + self.expansion_degree
-    }
 }
 
 pub struct ParentsIterRev<'a> {
@@ -216,7 +214,7 @@ impl<'a> Iterator for ParentsIterRev<'a> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index > self.graph.degree() {
+        if self.index > self.graph.degree {
             // already exhausted
             return None;
         }
@@ -259,7 +257,7 @@ impl<'a> Iterator for ParentsIter<'a> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index > self.graph.degree() {
+        if self.index > self.graph.degree {
             // already exhausted
             return None;
         }
@@ -292,12 +290,12 @@ impl<'a> Iterator for ParentsIter<'a> {
 
 impl<'a> ExactSizeIterator for ParentsIter<'a> {
     fn len(&self) -> usize {
-        self.graph.degree()
+        self.graph.degree
     }
 }
 
 impl<'a> ExactSizeIterator for ParentsIterRev<'a> {
     fn len(&self) -> usize {
-        self.graph.degree()
+        self.graph.degree
     }
 }

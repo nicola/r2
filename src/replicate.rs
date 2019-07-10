@@ -36,10 +36,20 @@ pub fn r<'a, H>(
 where
     H: Hasher,
 {
+    // instead of checking the parity of the layer per node,
+    // check that per layer.
+    let get_parents = {
+        if layer % 2 == 0 {
+            graph::Graph::parents_even
+        } else {
+            graph::Graph::parents_odd
+        }
+    };
+
     let mut parents = vec![0; graph.degree()];
     for node in 0..graph.nodes {
         // Get the `parents`
-        graph.parents(node, layer, &mut parents);
+        get_parents(&graph, node, &mut parents);
 
         // Compute `key` from `parents`
         let key = create_key::<H>(replica_id, node, &parents, data)?;

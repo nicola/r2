@@ -15,9 +15,9 @@ pub struct Graph {
     base_degree: usize,
     expansion_degree: usize,
     seed: [u32; 7],
-    bas: Vec<Vec<usize>>,
-    exp: Vec<Vec<usize>>,
-    exp_reversed: Vec<Vec<usize>>,
+    pub bas: Vec<Vec<usize>>,
+    pub exp: Vec<Vec<usize>>,
+    pub exp_reversed: Vec<Vec<usize>>,
 }
 
 /// Given a node and a graph, find the parents of a node DRG graph
@@ -84,7 +84,7 @@ fn expander_parents(
     // feistel permutation on the current node
     let parents: Vec<usize> = (0..g.expansion_degree)
         .filter_map(|i| {
-            let parent = feistel::invert_permute(
+            let parent = feistel::permute(
                 (g.nodes * g.expansion_degree) as feistel::Index,
                 (node * g.expansion_degree + i) as feistel::Index,
                 feistel_keys,

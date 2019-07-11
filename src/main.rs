@@ -1,11 +1,13 @@
 extern crate r2;
+use r2::{
+    file_backed_mmap_from_zeroes, graph, id_from_str, replicate, BASE_PARENTS, EXP_PARENTS, NODES,
+};
 use storage_proofs::drgraph::new_seed;
-use r2::{NODES, BASE_PARENTS, EXP_PARENTS, file_backed_mmap_from_zeroes, replicate, id_from_str, graph,};
 use storage_proofs::hasher::{Blake2sHasher, Hasher};
 
 fn main() {
     // Load the graph from memory or generate a new one
-    let gg = graph::Graph::new_cached(NODES, BASE_PARENTS, EXP_PARENTS, new_seed());
+    let gg = graph::Graph::new_cached();
     // Compute replica_id
     let replica_id = id_from_str::<<Blake2sHasher as Hasher>::Domain>("aaaa");
     // Generate a file full of zeroes to be replicated

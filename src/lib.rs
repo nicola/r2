@@ -8,7 +8,7 @@ pub mod graph;
 pub mod replicate;
 
 /// Size of the data to encode
-pub const DATA_SIZE: usize = 1 * 1024 * 1024;
+pub const DATA_SIZE: usize = 1 * 1024 * 1024 * 10;
 /// Size of each node in the graph
 pub const NODE_SIZE: usize = 32;
 /// Number of layers in ZigZag
@@ -21,6 +21,8 @@ pub const BASE_PARENTS: usize = 5;
 pub const EXP_PARENTS: usize = 8;
 /// Number of parents for each node in the graph
 pub const PARENT_SIZE: usize = BASE_PARENTS + EXP_PARENTS;
+
+pub const SEED: [u32; 7] = [0, 1, 2, 3, 4, 5, 6];
 
 /// Generate a tmp file full of zeros
 pub fn file_backed_mmap_from_zeroes(n: usize, use_tmp: bool) -> MmapMut {

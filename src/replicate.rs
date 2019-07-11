@@ -7,8 +7,7 @@ use storage_proofs::hasher::{Domain, Hasher};
 use storage_proofs::util::data_at_node_offset;
 
 use crate::graph;
-use crate::LAYERS;
-use crate::NODE_SIZE;
+use crate::{LAYERS, NODES, NODE_SIZE};
 
 /// Generates a ZigZag replicated sector
 pub fn r2<'a, H>(replica_id: &'a H::Domain, data: &'a mut [u8], g: &'a graph::Graph)
@@ -56,7 +55,7 @@ pub fn r_even<'a, H>(
 where
     H: Hasher,
 {
-    for node in 0..graph.nodes {
+    for node in 0..NODES {
         let parents = graph::Graph::parents_even(graph, node);
         // Compute `key` from `parents`
         let key = create_key::<H, _>(replica_id, node, parents, data)?;
@@ -86,7 +85,7 @@ pub fn r_odd<'a, H>(
 where
     H: Hasher,
 {
-    for node in 0..graph.nodes {
+    for node in 0..NODES {
         let parents = graph::Graph::parents_odd(graph, node);
         // Compute `key` from `parents`
         let key = create_key::<H, _>(replica_id, node, parents, data)?;

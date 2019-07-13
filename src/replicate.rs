@@ -4,7 +4,6 @@ use paired::bls12_381::Fr;
 use storage_proofs::error::Result;
 use storage_proofs::fr32::bytes_into_fr_repr_safe;
 use storage_proofs::hasher::{Domain, Hasher};
-use storage_proofs::util::data_at_node_offset;
 
 use crate::graph::{Graph, ParentsIter, ParentsIterRev};
 use crate::{BASE_PARENTS, LAYERS, NODES, NODE_SIZE};
@@ -96,7 +95,7 @@ where
 macro_rules! hash {
     ($parent:expr, $hasher:expr, $data:expr) => {
         let offset = data_at_node_offset($parent);
-        $hasher.update(&$data[offset..offset + NODE_SIZE]);
+        $hasher.update(&unsafe { $data.get_unchecked(offset..offset + NODE_SIZE) });
     };
 }
 
@@ -189,4 +188,9 @@ fn create_key_rev<H: Hasher>(
 
     let hash = hasher.finalize();
     bytes_into_fr_repr_safe(hash.as_ref()).into()
+}
+
+#[inline(always)]
+fn data_at_node_offset(v: usize) -> usize {
+    v * NODE_SIZE
 }

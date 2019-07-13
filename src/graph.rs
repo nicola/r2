@@ -159,18 +159,14 @@ impl Graph {
     }
 }
 
-pub trait Parents {
-    fn next(&self, index: usize) -> usize;
-}
-
 pub struct ParentsIter<'a> {
-    base_parents: &'a [usize],
-    exp_parents: &'a [usize],
+    pub base_parents: &'a [usize],
+    pub exp_parents: &'a [usize],
 }
 
 pub struct ParentsIterRev<'a> {
-    base_parents: &'a [usize],
-    exp_parents: &'a [usize],
+    pub base_parents: &'a [usize],
+    pub exp_parents: &'a [usize],
 }
 
 impl<'a> ParentsIterRev<'a> {
@@ -185,26 +181,6 @@ impl<'a> ParentsIterRev<'a> {
     }
 }
 
-impl<'a> Parents for ParentsIterRev<'a> {
-    #[inline]
-    fn next(&self, index: usize) -> usize {
-        // base parents
-        if index < self.base_parents.len() {
-            let res = NODES - self.base_parents[index] - 1;
-            return res;
-        }
-
-        // expansion parents
-        if index < self.base_parents.len() + self.exp_parents.len() {
-            let res = self.exp_parents[index - self.base_parents.len()];
-            return res;
-        }
-
-        // Padding after expansion parents
-        0
-    }
-}
-
 impl<'a> ParentsIter<'a> {
     pub fn new(graph: &'a Graph, node: usize) -> Self {
         let base_parents = &graph.bas[node];
@@ -214,25 +190,5 @@ impl<'a> ParentsIter<'a> {
             base_parents,
             exp_parents,
         }
-    }
-}
-
-impl<'a> Parents for ParentsIter<'a> {
-    #[inline]
-    fn next(&self, index: usize) -> usize {
-        // base parents
-        if index < self.base_parents.len() {
-            let res = self.base_parents[index];
-            return res;
-        }
-
-        // expansion parents
-        if index < self.base_parents.len() + self.exp_parents.len() {
-            let res = self.exp_parents[index - self.base_parents.len()];
-            return res;
-        }
-
-        // Padding after expansion parents
-        0
     }
 }

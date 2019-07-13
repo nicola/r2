@@ -8,7 +8,7 @@ pub mod graph;
 pub mod replicate;
 
 /// Size of the data to encode
-pub const DATA_SIZE: usize = 1 * 1024 * 1024 * 10;
+pub const DATA_SIZE: usize = 1 * 1024 * 1024 * 1024;
 /// Size of each node in the graph
 pub const NODE_SIZE: usize = 32;
 /// Number of layers in ZigZag

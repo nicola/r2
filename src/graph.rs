@@ -132,40 +132,6 @@ impl Graph {
         }
     }
 
-    #[inline]
-    pub fn parents_odd(&self, node: usize) -> ParentsIterRev<'_> {
-        // DRG parents
-        // On an odd layer, invert the graph:
-        // - given a node n, find the parents of nodes - n - 1
-        // - for each parent, return nodes - parent - 1
-        let n = NODES - node - 1;
-        let base_parents = &self.bas[n];
-
-        // Expander parents
-        // On an odd layer, reverse the edges:
-        // A->B is now B->A
-        let exp_parents = &self.exp_reversed[node];
-
-        ParentsIterRev {
-            base_parents,
-            exp_parents,
-            index: 0,
-        }
-    }
-
-    /// Load the parents of a node from cache
-    #[inline]
-    pub fn parents_even(&self, node: usize) -> ParentsIter<'_> {
-        let base_parents = &self.bas[node];
-        let exp_parents = &self.exp[node];
-
-        ParentsIter {
-            base_parents,
-            exp_parents,
-            index: 0,
-        }
-    }
-
     pub fn gen_parents_cache(&mut self) {
         let fp = feistel::precompute((EXP_PARENTS * NODES) as feistel::Index);
 
@@ -188,52 +154,37 @@ impl Graph {
     }
 }
 
-pub struct ParentsIterRev<'a> {
-    base_parents: &'a [usize],
-    exp_parents: &'a [usize],
-    index: usize,
-}
-
-impl<'a> Iterator for ParentsIterRev<'a> {
-    type Item = usize;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index > PARENT_SIZE {
-            // already exhausted
-            return None;
-        }
-
-        // base parents
-        if self.index < self.base_parents.len() {
-            let res = NODES - self.base_parents[self.index] - 1;
-            self.index += 1;
-            return Some(res);
-        }
-
-        // padding after base parents
-        if self.index < BASE_PARENTS {
-            self.index += 1;
-            return Some(0);
-        }
-
-        // expansion parents
-        if self.index < BASE_PARENTS + self.exp_parents.len() {
-            let res = self.exp_parents[self.index - BASE_PARENTS];
-            self.index += 1;
-            return Some(res);
-        }
-
-        // Padding after expansion parents
-        self.index += 1;
-        return Some(0);
-    }
-}
-
 pub struct ParentsIter<'a> {
     base_parents: &'a [usize],
     exp_parents: &'a [usize],
     index: usize,
+    inverted: bool,
+}
+
+impl<'a> ParentsIter<'a> {
+    pub fn new(graph: &'a Graph, node: usize, forward: bool) -> Self {
+        if forward {
+            let base_parents = &graph.bas[node];
+            let exp_parents = &graph.exp[node];
+
+            ParentsIter {
+                base_parents,
+                exp_parents,
+                index: 0,
+                inverted: false,
+            }
+        } else {
+            let base_parents = &graph.bas[NODES - node - 1];
+            let exp_parents = &graph.exp_reversed[node];
+
+            ParentsIter {
+                base_parents,
+                exp_parents,
+                index: 0,
+                inverted: true,
+            }
+        }
+    }
 }
 
 impl<'a> Iterator for ParentsIter<'a> {
@@ -248,20 +199,19 @@ impl<'a> Iterator for ParentsIter<'a> {
 
         // base parents
         if self.index < self.base_parents.len() {
-            let res = self.base_parents[self.index];
+            let mut res = self.base_parents[self.index];
+            if self.inverted {
+                res = self.base_parents[self.index];
+            } else {
+                res = NODES - self.base_parents[self.index] - 1;
+            }
             self.index += 1;
             return Some(res);
         }
 
-        // padding after base parents
-        if self.index < BASE_PARENTS {
-            self.index += 1;
-            return Some(0);
-        }
-
         // expansion parents
-        if self.index < BASE_PARENTS + self.exp_parents.len() {
-            let res = self.exp_parents[self.index - BASE_PARENTS];
+        if self.index < self.base_parents.len() + self.exp_parents.len() {
+            let res = self.exp_parents[self.index - self.base_parents.len()];
             self.index += 1;
             return Some(res);
         }
@@ -273,12 +223,6 @@ impl<'a> Iterator for ParentsIter<'a> {
 }
 
 impl<'a> ExactSizeIterator for ParentsIter<'a> {
-    fn len(&self) -> usize {
-        PARENT_SIZE
-    }
-}
-
-impl<'a> ExactSizeIterator for ParentsIterRev<'a> {
     fn len(&self) -> usize {
         PARENT_SIZE
     }

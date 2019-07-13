@@ -6,11 +6,11 @@ use storage_proofs::fr32::bytes_into_fr_repr_safe;
 use storage_proofs::hasher::{Domain, Hasher};
 use storage_proofs::util::data_at_node_offset;
 
-use crate::graph;
+use crate::graph::{Graph, ParentsIter};
 use crate::{LAYERS, NODES, NODE_SIZE};
 
 /// Generates a ZigZag replicated sector
-pub fn r2<'a, H>(replica_id: &'a H::Domain, data: &'a mut [u8], g: &'a graph::Graph)
+pub fn r2<'a, H>(replica_id: &'a H::Domain, data: &'a mut [u8], g: &'a Graph)
 where
     H: Hasher,
 {
@@ -28,7 +28,7 @@ where
 
 /// Encoding of a single layer
 pub fn r<'a, H>(
-    graph: &'a graph::Graph,
+    graph: &'a Graph,
     replica_id: &'a H::Domain,
     layer: usize,
     data: &'a mut [u8],
@@ -36,57 +36,9 @@ pub fn r<'a, H>(
 where
     H: Hasher,
 {
-    // Optimization
-    // instead of checking the parity of the layer per node,
-    // check that per layer.
-
-    if layer % 2 == 0 {
-        r_even::<H>(graph, replica_id, data)
-    } else {
-        r_odd::<H>(graph, replica_id, data)
-    }
-}
-
-pub fn r_even<'a, H>(
-    graph: &'a graph::Graph,
-    replica_id: &'a H::Domain,
-    data: &'a mut [u8],
-) -> Result<()>
-where
-    H: Hasher,
-{
+    let inverted = layer % 2 == 0;
     for node in 0..NODES {
-        let parents = graph::Graph::parents_even(graph, node);
-        // Compute `key` from `parents`
-        let key = create_key::<H, _>(replica_id, node, parents, data)?;
-
-        // Get the `unencoded` node
-        let start = data_at_node_offset(node);
-        let end = start + NODE_SIZE;
-        let node_data = H::Domain::try_from_bytes(&data[start..end])?;
-        let mut node_fr: Fr = node_data.into();
-
-        // Compute the `encoded` node by adding the `key` to it
-        node_fr.add_assign(&key.into());
-        let encoded: H::Domain = node_fr.into();
-
-        // Store the `encoded` data
-        encoded.write_bytes(&mut data[start..end])?;
-    }
-
-    Ok(())
-}
-
-pub fn r_odd<'a, H>(
-    graph: &'a graph::Graph,
-    replica_id: &'a H::Domain,
-    data: &'a mut [u8],
-) -> Result<()>
-where
-    H: Hasher,
-{
-    for node in 0..NODES {
-        let parents = graph::Graph::parents_odd(graph, node);
+        let parents = ParentsIter::new(graph, node, inverted);
         // Compute `key` from `parents`
         let key = create_key::<H, _>(replica_id, node, parents, data)?;
 

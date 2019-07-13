@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use blake2s_simd::{Params as Blake2s, State};
 use ff::Field;
 use paired::bls12_381::Fr;
@@ -10,7 +12,8 @@ use crate::{BASE_PARENTS, LAYERS, NODES, NODE_SIZE};
 
 macro_rules! replicate_layer {
     ($graph:expr, $replica_id:expr, $layer:expr, $data:expr) => {
-        println!("Replicating layer {}", $layer);
+        print!("Replicating layer {}", $layer);
+        let start = Instant::now();
 
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update($replica_id.as_ref());
@@ -35,12 +38,14 @@ macro_rules! replicate_layer {
                 .write_bytes(&mut $data[start..end])
                 .expect("failed to write");
         }
+        println!(" ... took {:0.4}ms", start.elapsed().as_millis());
     };
 }
 
 macro_rules! replicate_layer_rev {
     ($graph:expr, $replica_id:expr, $layer:expr, $data:expr) => {
-        println!("Replicating layer {}", $layer);
+        print!("Replicating layer {}", $layer);
+        let start = Instant::now();
 
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update($replica_id.as_ref());
@@ -65,6 +70,8 @@ macro_rules! replicate_layer_rev {
                 .write_bytes(&mut $data[start..end])
                 .expect("failed to write");
         }
+
+        println!(" ... took {:0.4}ms", start.elapsed().as_millis());
     };
 }
 

@@ -117,11 +117,12 @@ impl Graph {
     // Create a graph, generate its parents and cache them.
     // Parents are cached in a JSON file
     pub fn new_cached() -> Graph {
-        if let Err(_) = metadata("g.json") {
-            println!("Parents not cached, creating them");
+        let cache = format!("g_{}mb.json", NODES * 32 / 1024 / 1024);
+        if let Err(_) = metadata(&cache) {
+            println!("Parents not cached, creating {}", &cache);
             let mut gg = Graph::new();
             gg.gen_parents_cache();
-            let mut f = File::create("g.json").expect("Unable to create file");
+            let mut f = File::create(&cache).expect("Unable to create file");
             let j = serde_json::to_string(&gg).expect("unable to create json");
             write!(f, "{}\n", j).expect("Unable to write file");
 

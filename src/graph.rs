@@ -1,14 +1,19 @@
-use rand::{ChaChaRng, Rng, SeedableRng};
-use serde::{Deserialize, Serialize};
-use serde_json;
 use std::cmp;
 use std::fs::metadata;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Write;
-use storage_proofs::crypto::feistel;
 
-use crate::{BASE_PARENTS, EXP_PARENTS, NODES, PARENT_SIZE, SEED};
+use blake2s_simd::{Params as Blake2s, State};
+use rand::{ChaChaRng, Rng, SeedableRng};
+use serde::{Deserialize, Serialize};
+use serde_json;
+use storage_proofs::crypto::feistel;
+use storage_proofs::fr32::bytes_into_fr_repr_safe;
+use storage_proofs::hasher::{Domain, Hasher};
+use storage_proofs::util::data_at_node_offset;
+
+use crate::{BASE_PARENTS, EXP_PARENTS, NODES, NODE_SIZE, PARENT_SIZE, SEED};
 
 /// A Graph holds settings and cache
 #[derive(Serialize, Deserialize)]
@@ -154,76 +159,80 @@ impl Graph {
     }
 }
 
+pub trait Parents {
+    fn next(&self, index: usize) -> usize;
+}
+
 pub struct ParentsIter<'a> {
     base_parents: &'a [usize],
     exp_parents: &'a [usize],
-    index: usize,
-    inverted: bool,
 }
 
-impl<'a> ParentsIter<'a> {
-    pub fn new(graph: &'a Graph, node: usize, forward: bool) -> Self {
-        if forward {
-            let base_parents = &graph.bas[node];
-            let exp_parents = &graph.exp[node];
+pub struct ParentsIterRev<'a> {
+    base_parents: &'a [usize],
+    exp_parents: &'a [usize],
+}
 
-            ParentsIter {
-                base_parents,
-                exp_parents,
-                index: 0,
-                inverted: false,
-            }
-        } else {
-            let base_parents = &graph.bas[NODES - node - 1];
-            let exp_parents = &graph.exp_reversed[node];
+impl<'a> ParentsIterRev<'a> {
+    pub fn new(graph: &'a Graph, node: usize) -> Self {
+        let base_parents = &graph.bas[NODES - node - 1];
+        let exp_parents = &graph.exp_reversed[node];
 
-            ParentsIter {
-                base_parents,
-                exp_parents,
-                index: 0,
-                inverted: true,
-            }
+        ParentsIterRev {
+            base_parents,
+            exp_parents,
         }
     }
 }
 
-impl<'a> Iterator for ParentsIter<'a> {
-    type Item = usize;
-
+impl<'a> Parents for ParentsIterRev<'a> {
     #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index > PARENT_SIZE {
-            // already exhausted
-            return None;
-        }
-
+    fn next(&self, index: usize) -> usize {
         // base parents
-        if self.index < self.base_parents.len() {
-            let mut res = self.base_parents[self.index];
-            if self.inverted {
-                res = self.base_parents[self.index];
-            } else {
-                res = NODES - self.base_parents[self.index] - 1;
-            }
-            self.index += 1;
-            return Some(res);
+        if index < self.base_parents.len() {
+            let res = NODES - self.base_parents[index] - 1;
+            return res;
         }
 
         // expansion parents
-        if self.index < self.base_parents.len() + self.exp_parents.len() {
-            let res = self.exp_parents[self.index - self.base_parents.len()];
-            self.index += 1;
-            return Some(res);
+        if index < self.base_parents.len() + self.exp_parents.len() {
+            let res = self.exp_parents[index - self.base_parents.len()];
+            return res;
         }
 
         // Padding after expansion parents
-        self.index += 1;
-        return Some(0);
+        0
     }
 }
 
-impl<'a> ExactSizeIterator for ParentsIter<'a> {
-    fn len(&self) -> usize {
-        PARENT_SIZE
+impl<'a> ParentsIter<'a> {
+    pub fn new(graph: &'a Graph, node: usize) -> Self {
+        let base_parents = &graph.bas[node];
+        let exp_parents = &graph.exp[node];
+
+        ParentsIter {
+            base_parents,
+            exp_parents,
+        }
+    }
+}
+
+impl<'a> Parents for ParentsIter<'a> {
+    #[inline]
+    fn next(&self, index: usize) -> usize {
+        // base parents
+        if index < self.base_parents.len() {
+            let res = self.base_parents[index];
+            return res;
+        }
+
+        // expansion parents
+        if index < self.base_parents.len() + self.exp_parents.len() {
+            let res = self.exp_parents[index - self.base_parents.len()];
+            return res;
+        }
+
+        // Padding after expansion parents
+        0
     }
 }

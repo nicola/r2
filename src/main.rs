@@ -12,12 +12,12 @@ use futures_util::future::FutureExt;
 use futures_util::try_future::TryFutureExt;
 use tokio;
 use tokio::fs;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWriteExt};
 use tokio::prelude::*;
 
 #[tokio::main]
 pub async fn main() -> Result<(), failure::Error> {
-    let mut file = fs::File::create("tmp.txt").await?;
+    let file = fs::File::create("tmp.txt").await?;
     let file = set_len(file, (NODES * NODE_SIZE) as u64).await?;
 
     let mut data = AsyncData::new(file);
@@ -49,7 +49,7 @@ pub async fn main() -> Result<(), failure::Error> {
 // }
 
 pub struct AsyncData {
-    nodes: Option<oneshot::Receiver<HashMap<usize, Vec<u8>>>>,
+    nodes: Option<oneshot::Receiver<(fs::File, HashMap<usize, Vec<u8>>)>>,
     nodes_map: Option<HashMap<usize, Vec<u8>>>,
     file: Option<fs::File>,
 }
@@ -75,25 +75,11 @@ impl AsyncData {
         let mut list = vec![node];
         list.extend(parents);
 
-        let mut file = self.file.take().unwrap();
         tokio::spawn(
-            async move || {
-                let mut res = HashMap::new();
-                for node in parents.into_iter() {
-                    let offset = node * NODE_SIZE;
-                    let mut buf = vec![0u8; NODE_SIZE];
-
-                    file.seek(SeekFrom::Start(offset as u64)).await;
-                    AsyncReadExt::read(&mut file, &mut buf[..]).await;
-
-                    // Ok((*node, buf))
-                }
-                sender.send(res);
-                Ok(());
-            }, // PrefetchNodeFuture::new(self.file.take().unwrap(), node, parents).map(|res| {
-               //     let (file, nodes) = res.unwrap();
-               //     sender.send((file, nodes)).unwrap();
-               // }),
+            PrefetchNodeFuture::new(self.file.take().unwrap(), node, parents).map(|res| {
+                let (file, nodes) = res.unwrap();
+                sender.send((file, nodes)).unwrap();
+            }),
         );
     }
 
@@ -101,8 +87,9 @@ impl AsyncData {
         println!("fetching node: {}", node);
         if self.nodes.is_some() {
             let f = self.nodes.take().expect("missing nodes");
-            let nodes = f.await.expect("failed to fetch");
+            let (file, nodes) = f.await.expect("failed to fetch");
 
+            self.file = Some(file);
             self.nodes_map = Some(nodes);
         }
 
@@ -123,7 +110,6 @@ impl AsyncData {
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct PrefetchNodeFuture {
     inner: Option<fs::File>,
-    current: usize,
     parents: Vec<usize>,
     nodes: Option<HashMap<usize, Vec<u8>>>,
 }
@@ -135,8 +121,7 @@ impl PrefetchNodeFuture {
 
         Self {
             inner: Some(file),
-            current: 0,
-            parents: p, // TODO store reference
+            parents: p,
             nodes: Some(HashMap::default()),
         }
     }
@@ -150,6 +135,7 @@ impl Future for PrefetchNodeFuture {
 
         match inner_self.nodes {
             Some(ref mut nodes) => {
+                // TODO: figure out if this loop works as expected
                 for node in &inner_self.parents {
                     let offset = node * NODE_SIZE;
                     let mut buf = vec![0u8; NODE_SIZE];

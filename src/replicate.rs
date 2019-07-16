@@ -156,6 +156,7 @@ fn create_key<H: Hasher>(
         hash!(next_exp!(parents, 9), hasher, data);
         hash!(next_exp!(parents, 10), hasher, data);
         hash!(next_exp!(parents, 11), hasher, data);
+        hash!(next_exp!(parents, 12), hasher, data);
     }
 
     let hash = hasher.finalize();
@@ -191,6 +192,7 @@ fn create_key_rev<H: Hasher>(
         hash!(next_exp!(parents, 9), hasher, data);
         hash!(next_exp!(parents, 10), hasher, data);
         hash!(next_exp!(parents, 11), hasher, data);
+        hash!(next_exp!(parents, 12), hasher, data);
     }
 
     let hash = hasher.finalize();

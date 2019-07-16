@@ -24,7 +24,7 @@ pub async fn main() -> Result<(), failure::Error> {
     let nodes = vec![(0, [0, 1, 4]), (1, [2, 4, 10])];
 
     for (node, parents) in nodes.into_iter() {
-        data.prefetch(0, &parents);
+        data.prefetch(node, &parents);
         std::thread::sleep(std::time::Duration::from_millis(10));
 
         for parent in &parents {

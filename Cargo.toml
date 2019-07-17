@@ -25,3 +25,7 @@ pin-utils = "0.1.0-alpha.4"
 
 [dependencies.tokio]
 git = "https://github.com/tokio-rs/tokio"
+
+
+[profile.release]
+debug = true

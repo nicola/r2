@@ -1,14 +1,29 @@
-use chrono::Utc;
-use memmap::{MmapMut, MmapOptions};
+#![feature(async_await, async_closure)]
+
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
+use std::io::SeekFrom;
+
+use chrono::Utc;
+use futures::channel::oneshot;
+use futures::future::poll_fn;
+use futures_util::future::FutureExt;
+use memmap::{MmapMut, MmapOptions};
+use tokio;
+use tokio::fs;
+use tokio::io::{AsyncRead, AsyncWriteExt};
+use tokio::prelude::*;
+
 use storage_proofs::hasher::Domain;
 use tempfile;
+
+use crate::graph::{ParentsIter, ParentsIterRev};
 
 pub mod graph;
 pub mod replicate;
 
 /// Size of the data to encode
-pub const DATA_SIZE: usize = 1 * 1024 * 1024 * 512; // * 1024;
+pub const DATA_SIZE: usize = 1 * 1024 * 1024; // * 1024;
 /// Size of each node in the graph
 pub const NODE_SIZE: usize = 32;
 /// Number of layers in ZigZag
@@ -23,6 +38,30 @@ pub const EXP_PARENTS: usize = 8;
 pub const PARENT_SIZE: usize = BASE_PARENTS + EXP_PARENTS;
 
 pub const SEED: [u32; 7] = [0, 1, 2, 3, 4, 5, 6];
+
+#[macro_export]
+macro_rules! next_base {
+    ($parents:expr, $index:expr) => {
+        // safe as we statically know this is fine. compiler, why don't you?
+        *unsafe { $parents.base_parents.get_unchecked($index) }
+    };
+}
+
+#[macro_export]
+macro_rules! next_base_rev {
+    ($parents:expr, $index:expr) => {
+        // safe as we statically know this is fine. compiler, why don't you?
+        NODES - *unsafe { $parents.base_parents.get_unchecked($index) } - 1
+    };
+}
+
+#[macro_export]
+macro_rules! next_exp {
+    ($parents:expr, $index:expr) => {
+        // safe as we statically know this is fine. compiler, why don't you?
+        *unsafe { $parents.exp_parents.get_unchecked($index - BASE_PARENTS) }
+    };
+}
 
 /// Generate a tmp file full of zeros
 pub fn file_backed_mmap_from_zeroes(n: usize, use_tmp: bool) -> MmapMut {
@@ -49,4 +88,222 @@ pub fn id_from_str<T: Domain>(raw: &str) -> T {
     let len = ::std::cmp::min(32, replica_id_raw.len());
     replica_id_bytes[..len].copy_from_slice(&replica_id_raw[..len]);
     T::try_from_bytes(&replica_id_bytes).expect("invalid replica id")
+}
+
+pub async fn create_empty_file(file_path: &'static str, size: usize) -> Result<(), failure::Error> {
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .read(true)
+        .open(file_path)
+        .await?;
+    poll_fn(|_cx| file.poll_set_len(size as u64)).await?;
+    Ok(())
+}
+
+pub struct AsyncData {
+    nodes: Option<oneshot::Receiver<(fs::File, HashMap<usize, Vec<u8>>)>>,
+    nodes_map: Option<HashMap<usize, Vec<u8>>>,
+    file: Option<fs::File>,
+}
+
+impl AsyncData {
+    pub async fn new(file_path: &'static str) -> Result<Self, failure::Error> {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .read(true)
+            .open(file_path)
+            .await?;
+
+        Ok(AsyncData {
+            nodes: None,
+            nodes_map: None,
+            file: Some(file),
+        })
+    }
+
+    pub fn prefetch(&mut self, node: usize, parents: &ParentsIter) {
+        // trigger async read into internal cache of
+        // - node
+        // - parents
+
+        let (sender, receiver) = oneshot::channel();
+
+        self.nodes = Some(receiver);
+        let list = vec![
+            node,
+            next_base!(parents, 0),
+            next_base!(parents, 1),
+            next_base!(parents, 2),
+            next_base!(parents, 3),
+            next_base!(parents, 4),
+            next_exp!(parents, 5),
+            next_exp!(parents, 6),
+            next_exp!(parents, 7),
+            next_exp!(parents, 8),
+            next_exp!(parents, 9),
+            next_exp!(parents, 10),
+            next_exp!(parents, 11),
+            next_exp!(parents, 12),
+        ];
+
+        tokio::spawn(
+            PrefetchNodeFuture::new(self.file.take().unwrap(), list).map(|res| {
+                let (file, nodes) = res.unwrap();
+                sender.send((file, nodes)).unwrap();
+            }),
+        );
+    }
+
+    pub fn prefetch_rev(&mut self, node: usize, parents: &ParentsIterRev) {
+        // trigger async read into internal cache of
+        // - node
+        // - parents
+
+        let (sender, receiver) = oneshot::channel();
+
+        self.nodes = Some(receiver);
+        let list = vec![
+            node,
+            next_base_rev!(parents, 0),
+            next_base_rev!(parents, 1),
+            next_base_rev!(parents, 2),
+            next_base_rev!(parents, 3),
+            next_base_rev!(parents, 4),
+            next_exp!(parents, 5),
+            next_exp!(parents, 6),
+            next_exp!(parents, 7),
+            next_exp!(parents, 8),
+            next_exp!(parents, 9),
+            next_exp!(parents, 10),
+            next_exp!(parents, 11),
+            next_exp!(parents, 12),
+        ];
+
+        tokio::spawn(
+            PrefetchNodeFuture::new(self.file.take().unwrap(), list).map(|res| {
+                let (file, nodes) = res.unwrap();
+                sender.send((file, nodes)).unwrap();
+            }),
+        );
+    }
+
+    async fn fetch_node(&mut self) {
+        if self.nodes.is_some() {
+            let f = self.nodes.take().expect("missing nodes");
+            let (file, nodes) = f.await.expect("failed to fetch");
+
+            self.file = Some(file);
+            self.nodes_map = Some(nodes);
+        }
+    }
+
+    pub async fn get_node(&mut self, node: usize) -> &[u8] {
+        // println!("fetching node: {}", node);
+        self.fetch_node().await;
+
+        self.nodes_map
+            .as_ref()
+            .unwrap()
+            .get(&node)
+            .map(|v| &v[..])
+            .unwrap()
+    }
+
+    pub async fn get_node_mut(&mut self, node: usize) -> &mut [u8] {
+        self.fetch_node().await;
+
+        self.nodes_map
+            .as_mut()
+            .unwrap()
+            .get_mut(&node)
+            .map(|v| &mut v[..])
+            .unwrap()
+    }
+
+    /// Write the node to disk, has to be called __after__ `get_node_mut` to this node.
+    pub async fn write_node(&mut self, node: usize) {
+        let data = self
+            .nodes_map
+            .as_ref()
+            .unwrap()
+            .get(&node)
+            .map(|v| &v[..])
+            .unwrap();
+        let offset = node * NODE_SIZE;
+        // println!("Writing {} - {:?} - {}", node, data, offset);
+
+        let file = self.file.take().unwrap();
+        let (mut file, _) = file.seek(SeekFrom::Start(offset as u64)).await.unwrap();
+        file.write(data).await.unwrap();
+        self.file = Some(file);
+    }
+
+    pub async fn flush(&mut self) {
+        let mut file = self.file.take().unwrap();
+        poll_fn(|_cx| file.poll_sync_data()).await.unwrap();
+        self.file = Some(file);
+    }
+}
+
+#[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
+pub struct PrefetchNodeFuture {
+    inner: Option<fs::File>,
+    list: Vec<usize>,
+    nodes: Option<HashMap<usize, Vec<u8>>>,
+    buf: Vec<u8>,
+}
+
+impl PrefetchNodeFuture {
+    pub fn new(file: fs::File, list: Vec<usize>) -> Self {
+        Self {
+            buf: vec![0u8; NODE_SIZE],
+            inner: Some(file),
+            list,
+            nodes: Some(HashMap::default()),
+        }
+    }
+}
+
+impl Future for PrefetchNodeFuture {
+    type Output = std::io::Result<(fs::File, HashMap<usize, Vec<u8>>)>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        let inner_self = std::pin::Pin::get_mut(self);
+
+        match inner_self.nodes {
+            Some(ref mut nodes) => {
+                // TODO: figure out if this loop works as expected
+                for node in &inner_self.list {
+                    let offset = node * NODE_SIZE;
+                    let f = inner_self.inner.as_mut().expect("fail after resolve");
+
+                    futures::ready!(f.poll_seek(SeekFrom::Start(offset as u64)))?;
+
+                    pin_utils::pin_mut!(f);
+                    let pf: std::pin::Pin<&mut _> = f;
+                    futures::ready!(AsyncRead::poll_read(pf, _cx, &mut inner_self.buf[..]))?;
+                    nodes.insert(*node, inner_self.buf.clone());
+                }
+
+                // done
+                let inner = inner_self.inner.take().unwrap();
+                let nodes = inner_self.nodes.take().unwrap();
+                Poll::Ready(Ok((inner, nodes)))
+            }
+            None => {
+                panic!("already resolved");
+            }
+        }
+    }
+}
+
+#[inline(always)]
+fn data_at_node_offset(v: usize) -> usize {
+    v * NODE_SIZE
 }

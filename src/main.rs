@@ -14,7 +14,7 @@ pub async fn main() -> Result<(), failure::Error> {
     let file_path = "/tmp/replicate.data";
 
     // Create an empty file to replicate.
-    create_empty_file(file_path.clone(), NODES * NODE_SIZE).await?;
+    create_empty_file(file_path.clone(), NODES).await?;
 
     // Create the construct that allows us to do the prefetching.
     let mut data = AsyncData::new(file_path.clone()).await?;

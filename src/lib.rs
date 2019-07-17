@@ -3,11 +3,15 @@
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::SeekFrom;
+use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
-use futures::channel::oneshot;
+use futures::channel::mpsc;
 use futures::future::poll_fn;
 use futures_util::future::FutureExt;
+use futures_util::sink::SinkExt;
+use futures_util::stream::StreamExt;
+use futures_util::try_future::TryFutureExt;
 use memmap::{MmapMut, MmapOptions};
 use tokio;
 use tokio::fs;
@@ -103,7 +107,8 @@ pub async fn create_empty_file(file_path: &'static str, size: usize) -> Result<(
 }
 
 pub struct AsyncData {
-    nodes: Option<oneshot::Receiver<(fs::File, HashMap<usize, [u8; NODE_SIZE]>)>>,
+    receiver: mpsc::Receiver<(fs::File, HashMap<usize, [u8; NODE_SIZE]>)>,
+    sender: mpsc::Sender<(fs::File, HashMap<usize, [u8; NODE_SIZE]>)>,
     nodes_map: Option<HashMap<usize, [u8; NODE_SIZE]>>,
     file: Option<fs::File>,
 }
@@ -115,9 +120,11 @@ impl AsyncData {
             .read(true)
             .open(file_path)
             .await?;
+        let (sender, receiver) = mpsc::channel(2);
 
         Ok(AsyncData {
-            nodes: None,
+            receiver,
+            sender,
             nodes_map: None,
             file: Some(file),
         })
@@ -128,14 +135,15 @@ impl AsyncData {
         // - node
         // - parents
 
-        let (sender, receiver) = oneshot::channel();
-
-        self.nodes = Some(receiver);
+        let mut sender = self.sender.clone();
+        self.nodes_map.take();
         tokio::spawn(
-            PrefetchNodeFuture::new(self.file.take().unwrap(), node, parents).map(|res| {
-                let (file, nodes) = res.unwrap();
-                sender.send((file, nodes)).unwrap();
-            }),
+            PrefetchNodeFuture::new(self.file.take().unwrap(), node, parents)
+                .and_then(async move |res| {
+                    sender.send(res).await.unwrap();
+                    Ok(())
+                })
+                .map(|_| ()),
         );
     }
 
@@ -144,22 +152,21 @@ impl AsyncData {
         // - node
         // - parents
 
-        let (sender, receiver) = oneshot::channel();
-
-        self.nodes = Some(receiver);
-
+        let mut sender = self.sender.clone();
+        self.nodes_map.take();
         tokio::spawn(
-            PrefetchNodeFuture::new(self.file.take().unwrap(), node, parents).map(|res| {
-                let (file, nodes) = res.unwrap();
-                sender.send((file, nodes)).unwrap();
-            }),
+            PrefetchNodeFuture::new(self.file.take().unwrap(), node, parents)
+                .and_then(async move |res| {
+                    sender.send(res).await.unwrap();
+                    Ok(())
+                })
+                .map(|_| ()),
         );
     }
 
     async fn fetch_node(&mut self) {
-        if self.nodes.is_some() {
-            let f = self.nodes.take().expect("missing nodes");
-            let (file, nodes) = f.await.expect("failed to fetch");
+        if self.nodes_map.is_none() {
+            let (file, nodes) = self.receiver.next().await.expect("failed to fetch");
 
             self.file = Some(file);
             self.nodes_map = Some(nodes);
@@ -239,7 +246,7 @@ impl<T: Parents> PrefetchNodeFuture<T> {
 }
 
 impl<T: Parents + std::marker::Unpin> Future for PrefetchNodeFuture<T> {
-    type Output = std::io::Result<(fs::File, HashMap<usize, [u8; NODE_SIZE]>)>;
+    type Output = Result<(fs::File, HashMap<usize, [u8; NODE_SIZE]>), failure::Error>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
@@ -249,20 +256,29 @@ impl<T: Parents + std::marker::Unpin> Future for PrefetchNodeFuture<T> {
         match inner_self.nodes {
             Some(ref mut nodes) => {
                 if inner_self.to_encode.is_none() {
-                    inner_self.to_encode = Some(inner_self.parents.get_all(inner_self.node));
+                    let mut p = inner_self.parents.get_all(inner_self.node);
+                    p.sort_unstable();
+                    inner_self.to_encode = Some(p);
                 }
 
-                // TODO: figure out if this loop works as expected
+                let mut seek_current = 0;
+                let mut seek: SeekFrom;
+                let mut offset: u64;
                 for node in inner_self.to_encode.as_ref().unwrap() {
-                    let offset = node * NODE_SIZE;
-                    let f = inner_self.inner.as_mut().expect("fail after resolve");
+                    if !nodes.contains_key(node) {
+                        offset = (node * NODE_SIZE) as u64;
+                        // compute relative seeking offset, to improve seeking speed
+                        seek = SeekFrom::Current(offset as i64 - seek_current as i64);
 
-                    futures::ready!(f.poll_seek(SeekFrom::Start(offset as u64)))?;
+                        let f = inner_self.inner.as_mut().expect("fail after resolve");
 
-                    pin_utils::pin_mut!(f);
-                    let pf: std::pin::Pin<&mut _> = f;
-                    futures::ready!(AsyncRead::poll_read(pf, _cx, &mut inner_self.buf[..]))?;
-                    nodes.insert(*node, inner_self.buf.clone());
+                        seek_current = futures::ready!(f.poll_seek(seek))?;
+
+                        pin_utils::pin_mut!(f);
+                        let pf: std::pin::Pin<&mut _> = f;
+                        futures::ready!(AsyncRead::poll_read(pf, _cx, &mut inner_self.buf[..]))?;
+                        nodes.insert(*node, inner_self.buf.clone());
+                    }
                 }
 
                 // done

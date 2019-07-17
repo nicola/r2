@@ -1,10 +1,37 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use blake2s_simd::{Params as Blake2s, State};
 use ff::Field;
 use paired::bls12_381::Fr;
 use storage_proofs::fr32::bytes_into_fr_repr_safe;
 use storage_proofs::hasher::{Domain, Hasher};
+
+#[cfg(feature = "profile")]
+use gperftools::profiler::PROFILER;
+
+#[cfg(feature = "profile")]
+#[inline(always)]
+fn start_profile(stage: &str) {
+    PROFILER
+        .lock()
+        .unwrap()
+        .start(format!("./{}.profile", stage))
+        .unwrap();
+}
+
+#[cfg(not(feature = "profile"))]
+#[inline(always)]
+fn start_profile(_stage: &str) {}
+
+#[cfg(feature = "profile")]
+#[inline(always)]
+fn stop_profile() {
+    PROFILER.lock().unwrap().stop().unwrap();
+}
+
+#[cfg(not(feature = "profile"))]
+#[inline(always)]
+fn stop_profile() {}
 
 use crate::graph::{Graph, ParentsIter, ParentsIterRev};
 use crate::{next_base, next_base_rev, next_exp, AsyncData, BASE_PARENTS, NODES, NODE_SIZE};
@@ -17,12 +44,19 @@ macro_rules! replicate_layer {
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update($replica_id.as_ref());
 
+        let mut key_dur = Duration::new(0, 0);
+        let mut write_time = Duration::new(0, 0);
+
+        start_profile("layer");
+
         for node in 0..NODES {
             let parents = ParentsIter::new($graph.clone(), node);
             $data.prefetch(node, parents.clone());
 
+            let start = Instant::now();
             // Compute `key` from `parents`
             let key = create_key::<H>(&parents, node, $data, hasher.clone()).await;
+            key_dur += start.elapsed();
 
             // Get the `unencoded` node
             let raw_node_data = $data.get_node(node).await;
@@ -33,12 +67,17 @@ macro_rules! replicate_layer {
             node_fr.add_assign(&key.into());
             let encoded: H::Domain = node_fr.into();
 
+            let start = Instant::now();
             // Store the `encoded` data
             let node_mut = $data.get_node_mut(node).await;
             encoded.write_bytes(node_mut).unwrap();
             $data.write_node(node).await;
+            write_time += start.elapsed();
         }
+        stop_profile();
         println!(" ... took {:0.4}ms", start.elapsed().as_millis());
+        println!("  key: {:0.4}ms", key_dur.as_millis());
+        println!("  write: {:0.4}ms", write_time.as_millis());
     };
 }
 
@@ -93,19 +132,19 @@ where
 
     // Generate a replica at each layer of the 10 layers
     replicate_layer!(g, replica_id, 0, data);
-    replicate_layer_rev!(g, replica_id, 1, data);
+    // replicate_layer_rev!(g, replica_id, 1, data);
 
-    replicate_layer!(g, replica_id, 2, data);
-    replicate_layer_rev!(g, replica_id, 3, data);
+    // replicate_layer!(g, replica_id, 2, data);
+    // replicate_layer_rev!(g, replica_id, 3, data);
 
-    replicate_layer!(g, replica_id, 4, data);
-    replicate_layer_rev!(g, replica_id, 5, data);
+    // replicate_layer!(g, replica_id, 4, data);
+    // replicate_layer_rev!(g, replica_id, 5, data);
 
-    replicate_layer!(g, replica_id, 6, data);
-    replicate_layer_rev!(g, replica_id, 7, data);
+    // replicate_layer!(g, replica_id, 6, data);
+    // replicate_layer_rev!(g, replica_id, 7, data);
 
-    replicate_layer!(g, replica_id, 8, data);
-    replicate_layer_rev!(g, replica_id, 9, data);
+    // replicate_layer!(g, replica_id, 8, data);
+    // replicate_layer_rev!(g, replica_id, 9, data);
 
     Ok(())
 }

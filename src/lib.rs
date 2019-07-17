@@ -103,8 +103,8 @@ pub async fn create_empty_file(file_path: &'static str, size: usize) -> Result<(
 }
 
 pub struct AsyncData {
-    nodes: Option<oneshot::Receiver<(fs::File, HashMap<usize, Vec<u8>>)>>,
-    nodes_map: Option<HashMap<usize, Vec<u8>>>,
+    nodes: Option<oneshot::Receiver<(fs::File, HashMap<usize, [u8; NODE_SIZE]>)>>,
+    nodes_map: Option<HashMap<usize, [u8; NODE_SIZE]>>,
     file: Option<fs::File>,
 }
 
@@ -220,15 +220,17 @@ pub struct PrefetchNodeFuture<T: Parents> {
     inner: Option<fs::File>,
     node: usize,
     parents: T,
-    nodes: Option<HashMap<usize, Vec<u8>>>,
-    buf: Vec<u8>,
+    to_encode: Option<[usize; 14]>,
+    nodes: Option<HashMap<usize, [u8; NODE_SIZE]>>,
+    buf: [u8; NODE_SIZE],
 }
 
 impl<T: Parents> PrefetchNodeFuture<T> {
     pub fn new(file: fs::File, node: usize, parents: T) -> Self {
         Self {
-            buf: vec![0u8; NODE_SIZE],
+            buf: [0u8; NODE_SIZE],
             node,
+            to_encode: None,
             inner: Some(file),
             parents,
             nodes: Some(HashMap::default()),
@@ -237,19 +239,21 @@ impl<T: Parents> PrefetchNodeFuture<T> {
 }
 
 impl<T: Parents + std::marker::Unpin> Future for PrefetchNodeFuture<T> {
-    type Output = std::io::Result<(fs::File, HashMap<usize, Vec<u8>>)>;
+    type Output = std::io::Result<(fs::File, HashMap<usize, [u8; NODE_SIZE]>)>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
         _cx: &mut std::task::Context<'_>,
     ) -> Poll<Self::Output> {
         let inner_self = std::pin::Pin::get_mut(self);
-        let list = inner_self.parents.get_all(inner_self.node);
-
         match inner_self.nodes {
             Some(ref mut nodes) => {
+                if inner_self.to_encode.is_none() {
+                    inner_self.to_encode = Some(inner_self.parents.get_all(inner_self.node));
+                }
+
                 // TODO: figure out if this loop works as expected
-                for node in &list {
+                for node in inner_self.to_encode.as_ref().unwrap() {
                     let offset = node * NODE_SIZE;
                     let f = inner_self.inner.as_mut().expect("fail after resolve");
 

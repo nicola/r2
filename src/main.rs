@@ -1,12 +1,13 @@
 #![feature(async_await, async_closure)]
 
+use blake2s_simd::Params as Blake2s;
+use r2::{file_backed_mmap_from_zeroes, graph, id_from_str, replicate, NODES, NODE_SIZE};
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom};
-
-use r2::{file_backed_mmap_from_zeroes, graph, id_from_str, replicate, NODES, NODE_SIZE};
 use storage_proofs::hasher::{Blake2sHasher, Hasher};
 
 use futures::channel::oneshot;
+use futures::future::poll_fn;
 use futures::future::BoxFuture;
 use futures_util::future::FutureExt;
 use futures_util::try_future::TryFutureExt;
@@ -17,20 +18,36 @@ use tokio::prelude::*;
 
 #[tokio::main]
 pub async fn main() -> Result<(), failure::Error> {
-    let file = fs::File::create("tmp.txt").await?;
-    let file = set_len(file, (NODES * NODE_SIZE) as u64).await?;
+    let file_path = "tmp.txt";
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .read(true)
+        .open(file_path.clone())
+        .await?;
+    poll_fn(|_cx| file.poll_set_len((NODES * NODE_SIZE) as u64)).await?;
 
-    let mut data = AsyncData::new(file);
-    let nodes = vec![(0, [0, 1, 4]), (1, [2, 4, 10])];
+    let mut data = AsyncData::new(file_path.clone()).await;
+    let nodes = vec![(0, [0, 1, 4]), (1, [0, 4, 10]), (2, [0, 1, 2])];
 
     for (node, parents) in nodes.into_iter() {
         data.prefetch(node, &parents);
         std::thread::sleep(std::time::Duration::from_millis(10));
 
         for parent in &parents {
-            let n = data.get_node(*parent).await;
-            println!("n{} - {}: {:?}", node, parent, n);
+            let p = data.get_node(*parent).await;
+            println!("  {}: {:?}", parent, p);
         }
+
+        let n = data.get_node_mut(node).await;
+        println!("n{} - {:?}", node, n);
+
+        // fancy encoding
+        let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
+        hasher.update(n);
+        n.copy_from_slice(hasher.finalize().as_ref());
+        data.write_node(node).await;
     }
 
     Ok(())
@@ -55,7 +72,14 @@ pub struct AsyncData {
 }
 
 impl AsyncData {
-    pub fn new(file: fs::File) -> Self {
+    pub async fn new(file_path: &'static str) -> Self {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .read(true)
+            .open(file_path)
+            .await
+            .unwrap();
+
         AsyncData {
             nodes: None,
             nodes_map: None,
@@ -83,8 +107,7 @@ impl AsyncData {
         );
     }
 
-    pub async fn get_node(&mut self, node: usize) -> &[u8] {
-        println!("fetching node: {}", node);
+    async fn fetch_node(&mut self) {
         if self.nodes.is_some() {
             let f = self.nodes.take().expect("missing nodes");
             let (file, nodes) = f.await.expect("failed to fetch");
@@ -92,6 +115,11 @@ impl AsyncData {
             self.file = Some(file);
             self.nodes_map = Some(nodes);
         }
+    }
+
+    pub async fn get_node(&mut self, node: usize) -> &[u8] {
+        println!("fetching node: {}", node);
+        self.fetch_node().await;
 
         self.nodes_map
             .as_ref()
@@ -102,7 +130,33 @@ impl AsyncData {
     }
 
     pub async fn get_node_mut(&mut self, node: usize) -> &mut [u8] {
-        unimplemented!()
+        self.fetch_node().await;
+
+        self.nodes_map
+            .as_mut()
+            .unwrap()
+            .get_mut(&node)
+            .map(|v| &mut v[..])
+            .unwrap()
+    }
+
+    /// Write the node to disk, has to be called __after__ `get_node_mut` to this node.
+    pub async fn write_node(&mut self, node: usize) {
+        let data = self
+            .nodes_map
+            .as_ref()
+            .unwrap()
+            .get(&node)
+            .map(|v| &v[..])
+            .unwrap();
+        let offset = node * NODE_SIZE;
+        println!("Writing {} - {:?} - {}", node, data, offset);
+
+        let file = self.file.take().unwrap();
+        let (mut file, _) = file.seek(SeekFrom::Start(offset as u64)).await.unwrap();
+        file.write(data).await.unwrap();
+        poll_fn(|_cx| file.poll_sync_data()).await.unwrap();
+        self.file = Some(file);
     }
 }
 
@@ -112,6 +166,7 @@ pub struct PrefetchNodeFuture {
     inner: Option<fs::File>,
     parents: Vec<usize>,
     nodes: Option<HashMap<usize, Vec<u8>>>,
+    buf: Vec<u8>,
 }
 
 impl PrefetchNodeFuture {
@@ -120,6 +175,7 @@ impl PrefetchNodeFuture {
         p.extend(parents);
 
         Self {
+            buf: vec![0u8; NODE_SIZE],
             inner: Some(file),
             parents: p,
             nodes: Some(HashMap::default()),
@@ -130,7 +186,10 @@ impl PrefetchNodeFuture {
 impl Future for PrefetchNodeFuture {
     type Output = std::io::Result<(fs::File, HashMap<usize, Vec<u8>>)>;
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> Poll<Self::Output> {
         let inner_self = std::pin::Pin::get_mut(self);
 
         match inner_self.nodes {
@@ -138,25 +197,14 @@ impl Future for PrefetchNodeFuture {
                 // TODO: figure out if this loop works as expected
                 for node in &inner_self.parents {
                     let offset = node * NODE_SIZE;
-                    let mut buf = vec![0u8; NODE_SIZE];
-
-                    futures::ready!(inner_self
-                        .inner
-                        .as_mut()
-                        .expect("fail after resolve")
-                        .poll_seek(SeekFrom::Start(offset as u64)))?;
-
                     let f = inner_self.inner.as_mut().expect("fail after resolve");
-                    pin_utils::pin_mut!(f);
 
-                    match std::pin::Pin::get_mut(f).read(&mut buf[..]) {
-                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            return Poll::Pending
-                        }
-                        other => {
-                            nodes.insert(*node, buf);
-                        }
-                    }
+                    futures::ready!(f.poll_seek(SeekFrom::Start(offset as u64)))?;
+
+                    pin_utils::pin_mut!(f);
+                    let pf: std::pin::Pin<&mut _> = f;
+                    futures::ready!(AsyncRead::poll_read(pf, _cx, &mut inner_self.buf[..]))?;
+                    nodes.insert(*node, inner_self.buf.clone());
                 }
 
                 // done
@@ -169,43 +217,4 @@ impl Future for PrefetchNodeFuture {
             }
         }
     }
-}
-
-/// Future returned by `set_len`.
-#[derive(Debug)]
-#[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct SetLenFuture {
-    inner: Option<fs::File>,
-    len: u64,
-}
-
-impl SetLenFuture {
-    pub(crate) fn new(file: fs::File, len: u64) -> Self {
-        Self {
-            len,
-            inner: Some(file),
-        }
-    }
-}
-
-impl Future for SetLenFuture {
-    type Output = std::io::Result<fs::File>;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
-    ) -> Poll<Self::Output> {
-        let inner_self = std::pin::Pin::get_mut(self);
-        futures::ready!(inner_self
-            .inner
-            .as_mut()
-            .expect("Cannot poll `SetLenFuture` after it resolves")
-            .poll_set_len(inner_self.len))?;
-        let inner = inner_self.inner.take().unwrap();
-        Poll::Ready(Ok(inner))
-    }
-}
-
-fn set_len(file: fs::File, len: u64) -> SetLenFuture {
-    SetLenFuture::new(file, len)
 }

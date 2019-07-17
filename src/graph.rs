@@ -3,6 +3,7 @@ use std::fs::metadata;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Write;
+use std::sync::Arc;
 
 use blake2s_simd::{Params as Blake2s, State};
 use rand::{ChaChaRng, Rng, SeedableRng};
@@ -13,7 +14,10 @@ use storage_proofs::fr32::bytes_into_fr_repr_safe;
 use storage_proofs::hasher::{Domain, Hasher};
 use storage_proofs::util::data_at_node_offset;
 
-use crate::{BASE_PARENTS, EXP_PARENTS, NODES, NODE_SIZE, PARENT_SIZE, SEED};
+use crate::{
+    next_base, next_base_rev, next_exp, BASE_PARENTS, EXP_PARENTS, NODES, NODE_SIZE, PARENT_SIZE,
+    SEED,
+};
 
 /// A Graph holds settings and cache
 #[derive(Serialize, Deserialize)]
@@ -160,36 +164,90 @@ impl Graph {
     }
 }
 
-pub struct ParentsIter<'a> {
-    pub base_parents: &'a [usize],
-    pub exp_parents: &'a [usize],
+#[derive(Clone)]
+pub struct ParentsIter {
+    graph: Arc<Graph>,
+    node: usize,
 }
 
-pub struct ParentsIterRev<'a> {
-    pub base_parents: &'a [usize],
-    pub exp_parents: &'a [usize],
+#[derive(Clone)]
+pub struct ParentsIterRev {
+    graph: Arc<Graph>,
+    node: usize,
 }
 
-impl<'a> ParentsIterRev<'a> {
-    pub fn new(graph: &'a Graph, node: usize) -> Self {
-        let base_parents = &graph.bas[NODES - node - 1];
-        let exp_parents = &graph.exp_reversed[node];
+impl ParentsIterRev {
+    pub fn new(graph: Arc<Graph>, node: usize) -> Self {
+        ParentsIterRev { graph, node }
+    }
 
-        ParentsIterRev {
-            base_parents,
-            exp_parents,
-        }
+    #[inline]
+    pub fn base_parents(&self) -> &[usize] {
+        &self.graph.bas[self.node][..]
+    }
+    #[inline]
+    pub fn exp_parents(&self) -> &[usize] {
+        &self.graph.exp_reversed[self.node][..]
     }
 }
 
-impl<'a> ParentsIter<'a> {
-    pub fn new(graph: &'a Graph, node: usize) -> Self {
-        let base_parents = &graph.bas[node];
-        let exp_parents = &graph.exp[node];
+pub trait Parents {
+    fn get_all(&self, node: usize) -> [usize; 14];
+}
 
-        ParentsIter {
-            base_parents,
-            exp_parents,
-        }
+impl Parents for ParentsIterRev {
+    fn get_all(&self, node: usize) -> [usize; 14] {
+        [
+            node,
+            next_base_rev!(self, 0),
+            next_base_rev!(self, 1),
+            next_base_rev!(self, 2),
+            next_base_rev!(self, 3),
+            next_base_rev!(self, 4),
+            next_exp!(self, 5),
+            next_exp!(self, 6),
+            next_exp!(self, 7),
+            next_exp!(self, 8),
+            next_exp!(self, 9),
+            next_exp!(self, 10),
+            next_exp!(self, 11),
+            next_exp!(self, 12),
+        ]
+    }
+}
+
+impl ParentsIter {
+    pub fn new(graph: Arc<Graph>, node: usize) -> Self {
+        ParentsIter { node, graph }
+    }
+
+    #[inline]
+    pub fn base_parents(&self) -> &[usize] {
+        &self.graph.bas[self.node][..]
+    }
+    #[inline]
+    pub fn exp_parents(&self) -> &[usize] {
+        &self.graph.exp[self.node][..]
+    }
+}
+
+impl Parents for ParentsIter {
+    fn get_all(&self, node: usize) -> [usize; 14] {
+        [
+            node,
+            next_base!(self, 0),
+            next_base!(self, 1),
+            next_base!(self, 2),
+            next_base!(self, 3),
+            next_base!(self, 4),
+            next_exp!(self, 5),
+            next_exp!(self, 6),
+            next_exp!(self, 7),
+            next_exp!(self, 8),
+            next_exp!(self, 9),
+            next_exp!(self, 10),
+            next_exp!(self, 11),
+            next_exp!(self, 12),
+        ]
     }
 }

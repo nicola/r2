@@ -18,8 +18,8 @@ macro_rules! replicate_layer {
         hasher.update($replica_id.as_ref());
 
         for node in 0..NODES {
-            let parents = ParentsIter::new($graph, node);
-            $data.prefetch(node, &parents);
+            let parents = ParentsIter::new($graph.clone(), node);
+            $data.prefetch(node, parents.clone());
 
             // Compute `key` from `parents`
             let key = create_key::<H>(&parents, node, $data, hasher.clone()).await;
@@ -52,8 +52,8 @@ macro_rules! replicate_layer_rev {
 
         for node in 0..NODES {
             // TODO: use rev iter again
-            let parents = ParentsIterRev::new($graph, node);
-            $data.prefetch_rev(node, &parents);
+            let parents = ParentsIterRev::new($graph.clone(), node);
+            $data.prefetch_rev(node, parents.clone());
 
             // Compute `key` from `parents`
             // TODO: use rev again
@@ -81,13 +81,16 @@ macro_rules! replicate_layer_rev {
 /// Generates a ZigZag replicated sector.
 #[inline(never)]
 pub async fn r2<H>(
-    replica_id: &H::Domain,
+    replica_id: H::Domain,
     data: &mut AsyncData,
-    g: &Graph,
+    g: Graph,
 ) -> Result<(), failure::Error>
 where
     H: Hasher,
 {
+    use std::sync::Arc;
+    let g = Arc::new(g);
+
     // Generate a replica at each layer of the 10 layers
     replicate_layer!(g, replica_id, 0, data);
     replicate_layer_rev!(g, replica_id, 1, data);
@@ -114,7 +117,7 @@ macro_rules! hash {
 }
 
 async fn create_key<'a, H: Hasher>(
-    parents: &'a ParentsIter<'a>,
+    parents: &'a ParentsIter,
     node: usize,
     data: &'a mut AsyncData,
     mut hasher: State,
@@ -149,7 +152,7 @@ async fn create_key<'a, H: Hasher>(
 }
 
 async fn create_key_rev<'a, H: Hasher>(
-    parents: &'a ParentsIterRev<'a>,
+    parents: &'a ParentsIterRev,
     node: usize,
     data: &'a mut AsyncData,
     mut hasher: State,

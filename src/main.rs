@@ -22,7 +22,7 @@ pub async fn main() -> Result<(), failure::Error> {
     // Start replication
     println!("Starting replication");
 
-    replicate::r2::<Blake2sHasher>(&replica_id, &mut data, &gg).await?;
+    replicate::r2::<Blake2sHasher>(replica_id, &mut data, gg).await?;
 
     data.flush().await;
     Ok(())

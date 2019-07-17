@@ -17,7 +17,7 @@ use tokio::prelude::*;
 use storage_proofs::hasher::Domain;
 use tempfile;
 
-use crate::graph::{ParentsIter, ParentsIterRev};
+use crate::graph::{Parents, ParentsIter, ParentsIterRev};
 
 pub mod graph;
 pub mod replicate;
@@ -43,7 +43,7 @@ pub const SEED: [u32; 7] = [0, 1, 2, 3, 4, 5, 6];
 macro_rules! next_base {
     ($parents:expr, $index:expr) => {
         // safe as we statically know this is fine. compiler, why don't you?
-        *unsafe { $parents.base_parents.get_unchecked($index) }
+        *unsafe { $parents.base_parents().get_unchecked($index) }
     };
 }
 
@@ -51,7 +51,7 @@ macro_rules! next_base {
 macro_rules! next_base_rev {
     ($parents:expr, $index:expr) => {
         // safe as we statically know this is fine. compiler, why don't you?
-        NODES - *unsafe { $parents.base_parents.get_unchecked($index) } - 1
+        NODES - *unsafe { $parents.base_parents().get_unchecked($index) } - 1
     };
 }
 
@@ -59,7 +59,7 @@ macro_rules! next_base_rev {
 macro_rules! next_exp {
     ($parents:expr, $index:expr) => {
         // safe as we statically know this is fine. compiler, why don't you?
-        *unsafe { $parents.exp_parents.get_unchecked($index - BASE_PARENTS) }
+        *unsafe { $parents.exp_parents().get_unchecked($index - BASE_PARENTS) }
     };
 }
 
@@ -123,7 +123,7 @@ impl AsyncData {
         })
     }
 
-    pub fn prefetch(&mut self, node: usize, parents: &ParentsIter) {
+    pub fn prefetch(&mut self, node: usize, parents: ParentsIter) {
         // trigger async read into internal cache of
         // - node
         // - parents
@@ -131,32 +131,15 @@ impl AsyncData {
         let (sender, receiver) = oneshot::channel();
 
         self.nodes = Some(receiver);
-        let list = vec![
-            node,
-            next_base!(parents, 0),
-            next_base!(parents, 1),
-            next_base!(parents, 2),
-            next_base!(parents, 3),
-            next_base!(parents, 4),
-            next_exp!(parents, 5),
-            next_exp!(parents, 6),
-            next_exp!(parents, 7),
-            next_exp!(parents, 8),
-            next_exp!(parents, 9),
-            next_exp!(parents, 10),
-            next_exp!(parents, 11),
-            next_exp!(parents, 12),
-        ];
-
         tokio::spawn(
-            PrefetchNodeFuture::new(self.file.take().unwrap(), list).map(|res| {
+            PrefetchNodeFuture::new(self.file.take().unwrap(), node, parents).map(|res| {
                 let (file, nodes) = res.unwrap();
                 sender.send((file, nodes)).unwrap();
             }),
         );
     }
 
-    pub fn prefetch_rev(&mut self, node: usize, parents: &ParentsIterRev) {
+    pub fn prefetch_rev(&mut self, node: usize, parents: ParentsIterRev) {
         // trigger async read into internal cache of
         // - node
         // - parents
@@ -164,25 +147,9 @@ impl AsyncData {
         let (sender, receiver) = oneshot::channel();
 
         self.nodes = Some(receiver);
-        let list = vec![
-            node,
-            next_base_rev!(parents, 0),
-            next_base_rev!(parents, 1),
-            next_base_rev!(parents, 2),
-            next_base_rev!(parents, 3),
-            next_base_rev!(parents, 4),
-            next_exp!(parents, 5),
-            next_exp!(parents, 6),
-            next_exp!(parents, 7),
-            next_exp!(parents, 8),
-            next_exp!(parents, 9),
-            next_exp!(parents, 10),
-            next_exp!(parents, 11),
-            next_exp!(parents, 12),
-        ];
 
         tokio::spawn(
-            PrefetchNodeFuture::new(self.file.take().unwrap(), list).map(|res| {
+            PrefetchNodeFuture::new(self.file.take().unwrap(), node, parents).map(|res| {
                 let (file, nodes) = res.unwrap();
                 sender.send((file, nodes)).unwrap();
             }),
@@ -249,25 +216,27 @@ impl AsyncData {
 
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct PrefetchNodeFuture {
+pub struct PrefetchNodeFuture<T: Parents> {
     inner: Option<fs::File>,
-    list: Vec<usize>,
+    node: usize,
+    parents: T,
     nodes: Option<HashMap<usize, Vec<u8>>>,
     buf: Vec<u8>,
 }
 
-impl PrefetchNodeFuture {
-    pub fn new(file: fs::File, list: Vec<usize>) -> Self {
+impl<T: Parents> PrefetchNodeFuture<T> {
+    pub fn new(file: fs::File, node: usize, parents: T) -> Self {
         Self {
             buf: vec![0u8; NODE_SIZE],
+            node,
             inner: Some(file),
-            list,
+            parents,
             nodes: Some(HashMap::default()),
         }
     }
 }
 
-impl Future for PrefetchNodeFuture {
+impl<T: Parents + std::marker::Unpin> Future for PrefetchNodeFuture<T> {
     type Output = std::io::Result<(fs::File, HashMap<usize, Vec<u8>>)>;
 
     fn poll(
@@ -275,11 +244,12 @@ impl Future for PrefetchNodeFuture {
         _cx: &mut std::task::Context<'_>,
     ) -> Poll<Self::Output> {
         let inner_self = std::pin::Pin::get_mut(self);
+        let list = inner_self.parents.get_all(inner_self.node);
 
         match inner_self.nodes {
             Some(ref mut nodes) => {
                 // TODO: figure out if this loop works as expected
-                for node in &inner_self.list {
+                for node in &list {
                     let offset = node * NODE_SIZE;
                     let f = inner_self.inner.as_mut().expect("fail after resolve");
 

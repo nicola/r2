@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use blake2s_simd::{Params as Blake2s, State};
@@ -33,7 +34,7 @@ fn stop_profile() {
 #[inline(always)]
 fn stop_profile() {}
 
-use crate::graph::{Graph, ParentsIter, ParentsIterRev};
+use crate::graph::{Graph, Parents, ParentsIter, ParentsIterRev};
 use crate::{next_base, next_base_rev, next_exp, AsyncData, BASE_PARENTS, NODES, NODE_SIZE};
 
 macro_rules! replicate_layer {
@@ -49,18 +50,40 @@ macro_rules! replicate_layer {
 
         start_profile("layer");
 
+        // prefetch first node
+        $data.prefetch(0, false);
+
         for node in 0..NODES {
+            // prefetch next node
+            if node < NODES - 1 {
+                $data.prefetch(node + 1, false);
+            }
+            // if node < NODES - 2 {
+            //     $data.prefetch(node + 2, false);
+            // }
+            // if node < NODES - 3 {
+            //     $data.prefetch(node + 3, false);
+            // }
+            // if node < NODES - 4 {
+            //     $data.prefetch(node + 4, false);
+            // }
+            // if node < NODES - 5 {
+            //     $data.prefetch(node + 5, false);
+            // }
+            // if node < NODES - 6 {
+            //     $data.prefetch(node + 6, false);
+            // }
+
             let parents = ParentsIter::new($graph.clone(), node);
-            $data.prefetch(node, parents.clone());
 
             let start = Instant::now();
             // Compute `key` from `parents`
-            let key = create_key::<H>(&parents, node, $data, hasher.clone()).await;
+            let key = create_key::<H>(&parents, node, $data, hasher.clone());
             key_dur += start.elapsed();
 
             // Get the `unencoded` node
-            let raw_node_data = $data.get_node(node).await;
-            let node_data = H::Domain::try_from_bytes(raw_node_data).unwrap();
+            let mut raw_node_data = $data.get_node(node);
+            let node_data = H::Domain::try_from_bytes(&raw_node_data).unwrap();
             let mut node_fr: Fr = node_data.into();
 
             // Compute the `encoded` node by adding the `key` to it
@@ -69,9 +92,8 @@ macro_rules! replicate_layer {
 
             let start = Instant::now();
             // Store the `encoded` data
-            let node_mut = $data.get_node_mut(node).await;
-            encoded.write_bytes(node_mut).unwrap();
-            $data.write_node(node).await;
+            encoded.write_bytes(&mut raw_node_data).unwrap();
+            $data.write_node(node, raw_node_data);
             write_time += start.elapsed();
         }
         stop_profile();
@@ -89,18 +111,36 @@ macro_rules! replicate_layer_rev {
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update($replica_id.as_ref());
 
+        // prefetch first node
+        $data.prefetch(0, true);
+
         for node in 0..NODES {
-            // TODO: use rev iter again
+            // prefetch next node
+            if node < NODES - 1 {
+                $data.prefetch(node + 1, true);
+            }
+            // if node < NODES - 2 {
+            //     $data.prefetch(node + 2, true);
+            // }
+            // if node < NODES - 3 {
+            //     $data.prefetch(node + 3, true);
+            // }
+            // if node < NODES - 4 {
+            //     $data.prefetch(node + 4, true);
+            // }
+            // if node < NODES - 5 {
+            //     $data.prefetch(node + 5, true);
+            // }
+
             let parents = ParentsIterRev::new($graph.clone(), node);
-            $data.prefetch_rev(node, parents.clone());
 
             // Compute `key` from `parents`
             // TODO: use rev again
-            let key = create_key_rev::<H>(&parents, node, $data, hasher.clone()).await;
+            let key = create_key_rev::<H>(&parents, node, $data, hasher.clone());
 
             // Get the `unencoded` node
-            let raw_node_data = $data.get_node(node).await;
-            let node_data = H::Domain::try_from_bytes(raw_node_data).unwrap();
+            let mut raw_node_data = $data.get_node(node);
+            let node_data = H::Domain::try_from_bytes(&raw_node_data).unwrap();
             let mut node_fr: Fr = node_data.into();
 
             // Compute the `encoded` node by adding the `key` to it
@@ -108,9 +148,8 @@ macro_rules! replicate_layer_rev {
             let encoded: H::Domain = node_fr.into();
 
             // Store the `encoded` data
-            let node_mut = $data.get_node_mut(node).await;
-            encoded.write_bytes(node_mut).unwrap();
-            $data.write_node(node).await;
+            encoded.write_bytes(&mut raw_node_data).unwrap();
+            $data.write_node(node, raw_node_data);
         }
 
         println!(" ... took {:0.4}ms", start.elapsed().as_millis());
@@ -119,43 +158,40 @@ macro_rules! replicate_layer_rev {
 
 /// Generates a ZigZag replicated sector.
 #[inline(never)]
-pub async fn r2<H>(
+pub fn r2<H>(
     replica_id: H::Domain,
     data: &mut AsyncData,
-    g: Graph,
+    g: Arc<Graph>,
 ) -> Result<(), failure::Error>
 where
     H: Hasher,
 {
-    use std::sync::Arc;
-    let g = Arc::new(g);
-
     // Generate a replica at each layer of the 10 layers
     replicate_layer!(g, replica_id, 0, data);
-    // replicate_layer_rev!(g, replica_id, 1, data);
+    replicate_layer_rev!(g, replica_id, 1, data);
 
-    // replicate_layer!(g, replica_id, 2, data);
-    // replicate_layer_rev!(g, replica_id, 3, data);
+    replicate_layer!(g, replica_id, 2, data);
+    replicate_layer_rev!(g, replica_id, 3, data);
 
-    // replicate_layer!(g, replica_id, 4, data);
-    // replicate_layer_rev!(g, replica_id, 5, data);
+    replicate_layer!(g, replica_id, 4, data);
+    replicate_layer_rev!(g, replica_id, 5, data);
 
-    // replicate_layer!(g, replica_id, 6, data);
-    // replicate_layer_rev!(g, replica_id, 7, data);
+    replicate_layer!(g, replica_id, 6, data);
+    replicate_layer_rev!(g, replica_id, 7, data);
 
-    // replicate_layer!(g, replica_id, 8, data);
-    // replicate_layer_rev!(g, replica_id, 9, data);
+    replicate_layer!(g, replica_id, 8, data);
+    replicate_layer_rev!(g, replica_id, 9, data);
 
     Ok(())
 }
 
 macro_rules! hash {
     ($parent:expr, $hasher:expr, $data:expr) => {
-        $hasher.update($data.get_node($parent).await);
+        $hasher.update(&$data.get_node($parent));
     };
 }
 
-async fn create_key<'a, H: Hasher>(
+fn create_key<'a, H: Hasher>(
     parents: &'a ParentsIter,
     node: usize,
     data: &'a mut AsyncData,
@@ -165,32 +201,30 @@ async fn create_key<'a, H: Hasher>(
 
     // The hash is about the parents, hence skip if a node doesn't have any parents
     let p0 = next_base!(parents, 0);
-    if node != p0 {
-        // hash first parent
-        hasher.update(data.get_node(p0).await);
+    // if node != p0 {
+    // base parents
+    hasher.update(&data.get_node(p0));
+    hash!(next_base!(parents, 1), hasher, data);
+    hash!(next_base!(parents, 2), hasher, data);
+    hash!(next_base!(parents, 3), hasher, data);
+    hash!(next_base!(parents, 4), hasher, data);
 
-        // base parents
-        hash!(next_base!(parents, 1), hasher, data);
-        hash!(next_base!(parents, 2), hasher, data);
-        hash!(next_base!(parents, 3), hasher, data);
-        hash!(next_base!(parents, 4), hasher, data);
-
-        // exp parents
-        hash!(next_exp!(parents, 5), hasher, data);
-        hash!(next_exp!(parents, 6), hasher, data);
-        hash!(next_exp!(parents, 7), hasher, data);
-        hash!(next_exp!(parents, 8), hasher, data);
-        hash!(next_exp!(parents, 9), hasher, data);
-        hash!(next_exp!(parents, 10), hasher, data);
-        hash!(next_exp!(parents, 11), hasher, data);
-        hash!(next_exp!(parents, 12), hasher, data);
-    }
+    // exp parents
+    hash!(next_exp!(parents, 5), hasher, data);
+    hash!(next_exp!(parents, 6), hasher, data);
+    hash!(next_exp!(parents, 7), hasher, data);
+    hash!(next_exp!(parents, 8), hasher, data);
+    hash!(next_exp!(parents, 9), hasher, data);
+    hash!(next_exp!(parents, 10), hasher, data);
+    hash!(next_exp!(parents, 11), hasher, data);
+    hash!(next_exp!(parents, 12), hasher, data);
+    // }
 
     let hash = hasher.finalize();
     bytes_into_fr_repr_safe(hash.as_ref()).into()
 }
 
-async fn create_key_rev<'a, H: Hasher>(
+fn create_key_rev<'a, H: Hasher>(
     parents: &'a ParentsIterRev,
     node: usize,
     data: &'a mut AsyncData,
@@ -200,26 +234,26 @@ async fn create_key_rev<'a, H: Hasher>(
 
     // The hash is about the parents, hence skip if a node doesn't have any parents
     let p0 = next_base_rev!(parents, 0);
-    if node != p0 {
-        // hash first parent
-        hasher.update(data.get_node(p0).await);
+    //  if node != p0 {
+    // hash first parent
+    hasher.update(&data.get_node(p0));
 
-        // base parents
-        hash!(next_base_rev!(parents, 1), hasher, data);
-        hash!(next_base_rev!(parents, 2), hasher, data);
-        hash!(next_base_rev!(parents, 3), hasher, data);
-        hash!(next_base_rev!(parents, 4), hasher, data);
+    // base parents
+    hash!(next_base_rev!(parents, 1), hasher, data);
+    hash!(next_base_rev!(parents, 2), hasher, data);
+    hash!(next_base_rev!(parents, 3), hasher, data);
+    hash!(next_base_rev!(parents, 4), hasher, data);
 
-        // exp parents
-        hash!(next_exp!(parents, 5), hasher, data);
-        hash!(next_exp!(parents, 6), hasher, data);
-        hash!(next_exp!(parents, 7), hasher, data);
-        hash!(next_exp!(parents, 8), hasher, data);
-        hash!(next_exp!(parents, 9), hasher, data);
-        hash!(next_exp!(parents, 10), hasher, data);
-        hash!(next_exp!(parents, 11), hasher, data);
-        hash!(next_exp!(parents, 12), hasher, data);
-    }
+    // exp parents
+    hash!(next_exp!(parents, 5), hasher, data);
+    hash!(next_exp!(parents, 6), hasher, data);
+    hash!(next_exp!(parents, 7), hasher, data);
+    hash!(next_exp!(parents, 8), hasher, data);
+    hash!(next_exp!(parents, 9), hasher, data);
+    hash!(next_exp!(parents, 10), hasher, data);
+    hash!(next_exp!(parents, 11), hasher, data);
+    hash!(next_exp!(parents, 12), hasher, data);
+    // }
 
     let hash = hasher.finalize();
     bytes_into_fr_repr_safe(hash.as_ref()).into()

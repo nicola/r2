@@ -133,7 +133,7 @@ impl Graph {
             gg
         } else {
             println!("Parents are cached, loading them");
-            let mut f = File::open("g.json").expect("Unable to open the file");
+            let mut f = File::open(cache).expect("Unable to open the file");
             let mut json = String::new();
             f.read_to_string(&mut json)
                 .expect("Unable to read the file");
@@ -164,13 +164,11 @@ impl Graph {
     }
 }
 
-#[derive(Clone)]
 pub struct ParentsIter {
     graph: Arc<Graph>,
     node: usize,
 }
 
-#[derive(Clone)]
 pub struct ParentsIterRev {
     graph: Arc<Graph>,
     node: usize,
@@ -180,19 +178,12 @@ impl ParentsIterRev {
     pub fn new(graph: Arc<Graph>, node: usize) -> Self {
         ParentsIterRev { graph, node }
     }
-
-    #[inline]
-    pub fn base_parents(&self) -> &[usize] {
-        &self.graph.bas[self.node][..]
-    }
-    #[inline]
-    pub fn exp_parents(&self) -> &[usize] {
-        &self.graph.exp_reversed[self.node][..]
-    }
 }
 
 pub trait Parents {
     fn get_all(&self, node: usize) -> [usize; 14];
+    fn base_parents(&self) -> &[usize];
+    fn exp_parents(&self) -> &[usize];
 }
 
 impl Parents for ParentsIterRev {
@@ -214,24 +205,34 @@ impl Parents for ParentsIterRev {
             next_exp!(self, 12),
         ]
     }
+
+    #[inline]
+    fn base_parents(&self) -> &[usize] {
+        &self.graph.bas[self.node][..]
+    }
+
+    #[inline]
+    fn exp_parents(&self) -> &[usize] {
+        &self.graph.exp_reversed[self.node][..]
+    }
 }
 
 impl ParentsIter {
     pub fn new(graph: Arc<Graph>, node: usize) -> Self {
         ParentsIter { node, graph }
     }
-
-    #[inline]
-    pub fn base_parents(&self) -> &[usize] {
-        &self.graph.bas[self.node][..]
-    }
-    #[inline]
-    pub fn exp_parents(&self) -> &[usize] {
-        &self.graph.exp[self.node][..]
-    }
 }
 
 impl Parents for ParentsIter {
+    #[inline]
+    fn base_parents(&self) -> &[usize] {
+        &self.graph.bas[self.node][..]
+    }
+    #[inline]
+    fn exp_parents(&self) -> &[usize] {
+        &self.graph.exp[self.node][..]
+    }
+
     fn get_all(&self, node: usize) -> [usize; 14] {
         [
             node,

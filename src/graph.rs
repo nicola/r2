@@ -129,7 +129,8 @@ impl Graph {
             gg
         } else {
             println!("Parents are cached, loading them");
-            let mut f = File::open("g.json").expect("Unable to open the file");
+            let cache = format!("g_{}mb.json", NODES * 32 / 1024 / 1024);
+            let mut f = File::open(&cache).expect("Unable to open the file");
             let mut json = String::new();
             f.read_to_string(&mut json)
                 .expect("Unable to read the file");

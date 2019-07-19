@@ -10,7 +10,7 @@ edition = "2018"
 memmap = "0.7"
 chrono = "0.4"
 tempfile = "3"
-storage-proofs = "0.3.0"
+storage-proofs = "0.4.0"
 blake2s_simd = "0.5"
 paired = { version = "0.15", features = ["serde"] }
 ff = "0.4.0"
@@ -18,3 +18,11 @@ hex = "0.3.2"
 rand = "0.4"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"]}
+failure = "0.1.5"
+futures-preview = "0.3.0-alpha.17"
+runtime = "0.3.0-alpha.6"
+runtime-tokio = "0.3.0-alpha.5"
+
+
+[dependencies.tokio]
+git = "https://github.com/tokio-rs/tokio"

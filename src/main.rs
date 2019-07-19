@@ -1,8 +1,11 @@
+#![feature(async_await)]
+
 extern crate r2;
 use r2::{file_backed_mmap_from_zeroes, graph, id_from_str, replicate, NODES};
 use storage_proofs::hasher::{Blake2sHasher, Hasher};
 
-fn main() {
+#[runtime::main]
+async fn main() {
     // Load the graph from memory or generate a new one
     let gg = graph::Graph::new_cached();
     // Compute replica_id

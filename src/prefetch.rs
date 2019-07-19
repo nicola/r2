@@ -35,15 +35,15 @@ impl DataPrefetch {
         }
     }
     pub fn get_node(&mut self, node: usize, layer: usize) -> &[u8; 32] {
-        println!("getting {} for layer {} (requested)", node, layer);
+        // println!("getting {} for layer {} (requested)", node, layer);
         if !self.cache.contains_key(&node) {
             self.prefetch_node(node, layer);
             let future = self.map.remove(&node).unwrap();
             let data = futures::executor::block_on(future);
-            println!("getting {} for layer {} (block)", node, layer);
+            // println!("getting {} for layer {} (block)", node, layer);
             self.cache.insert(node, data);
         }
-        println!("getting {} for layer {} (cached)", node, layer);
+        // println!("getting {} for layer {} (cached)", node, layer);
         self.cache.get(&node).unwrap()
     }
     pub async fn await_all(&mut self) -> HashMap<usize, [u8; 32]> {
@@ -79,22 +79,22 @@ impl DataPrefetch {
                 file.seek(SeekFrom::Start((index * NODE_SIZE) as u64))
                     .unwrap();
                 file.read(&mut buf).unwrap();
-                println!("prefetching {} for layer {} (disk-done)", index, layer);
+                // println!("prefetching {} for layer {} (disk-done)", index, layer);
                 buf
             });
             self.map.insert(index, handle);
-            println!("prefetching {} for layer {} (disk-requested)", index, layer);
+            // println!("prefetching {} for layer {} (disk-requested)", index, layer);
         } else {
-            // println!("prefetching {} for layer {} (prefetched)", index, layer);
+            // // println!("prefetching {} for layer {} (prefetched)", index, layer);
         }
     }
     pub fn prefetch<'a>(&mut self, g: &'a Graph, node: usize, layer: usize) {
         let parents = ParentsIter::new(g, node);
-        println!("---- calling prefetch on {}", node);
-        println!(
-            "base parents: {:?}, exp parents {:?}",
-            parents.base_parents, parents.exp_parents
-        );
+        // println!("---- calling prefetch on {}", node);
+        // println!(
+        //     "base parents: {:?}, exp parents {:?}",
+        //     parents.base_parents, parents.exp_parents
+        // );
 
         self.prefetch_node(next_base!(parents, 0), layer);
         self.prefetch_node(next_base!(parents, 1), layer);
@@ -128,7 +128,7 @@ impl DataPrefetch {
 //     let buf1: [u8; 32] = handle1.await;
 //     let buf2: [u8; 32] = handle2.await;
 
-//     println!("{:?}", String::from_utf8_lossy(&buf1));
-//     println!("{:?}", String::from_utf8_lossy(&buf2));
+//     // println!("{:?}", String::from_utf8_lossy(&buf1));
+//     // println!("{:?}", String::from_utf8_lossy(&buf2));
 //     Ok(())
 // }

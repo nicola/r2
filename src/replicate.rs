@@ -13,7 +13,7 @@ use crate::{BASE_PARENTS, LAYERS, NODES, NODE_SIZE};
 
 macro_rules! replicate_layer {
     ($graph:expr, $replica_id:expr, $layer:expr, $data:expr) => {
-        println!("Replicating layer {}", $layer);
+        dbg!("Replicating layer {}", $layer);
         let start = Instant::now();
 
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
@@ -25,7 +25,7 @@ macro_rules! replicate_layer {
 
         data_curr.prefetch($graph, 0, $layer);
         for node in 0..NODES {
-            println!("encode node {}", node);
+            dbg!("encode node {}", node);
             if node < NODES - 1 {
                 data_next.prefetch($graph, node + 1, $layer);
             }
@@ -54,13 +54,13 @@ macro_rules! replicate_layer {
             data_next = tmp1;
             data_next.clear();
         }
-        println!(" ... took {:0.4}ms", start.elapsed().as_millis());
+        dbg!(" ... took {:0.4}ms", start.elapsed().as_millis());
     };
 }
 
 macro_rules! replicate_layer_rev {
     ($graph:expr, $replica_id:expr, $layer:expr, $data:expr) => {
-        println!("Replicating layer {}", $layer);
+        dbg!("Replicating layer {}", $layer);
         let start = Instant::now();
 
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
@@ -87,7 +87,7 @@ macro_rules! replicate_layer_rev {
                 .expect("failed to write");
         }
 
-        println!(" ... took {:0.4}ms", start.elapsed().as_millis());
+        dbg!(" ... took {:0.4}ms", start.elapsed().as_millis());
     };
 }
 
@@ -156,17 +156,17 @@ fn create_key<H: Hasher>(
     let p0 = next_base!(parents, 0);
     if node != p0 {
         // hash first parentget_node
-        println!("  soon to fetch {}", node);
+        dbg!("  soon to fetch {}", node);
         hasher.update(data.get_node(node, layer));
 
         // base parents
-        println!("  soon to fetch {}", next_base!(parents, 1));
+        dbg!("  soon to fetch {}", next_base!(parents, 1));
         hasher.update(data.get_node(next_base!(parents, 1), layer));
-        println!("  soon to fetch {}", next_base!(parents, 2));
+        dbg!("  soon to fetch {}", next_base!(parents, 2));
         hasher.update(data.get_node(next_base!(parents, 2), layer));
-        println!("  soon to fetch {}", next_base!(parents, 3));
+        dbg!("  soon to fetch {}", next_base!(parents, 3));
         hasher.update(data.get_node(next_base!(parents, 3), layer));
-        println!("  soon to fetch {}", next_base!(parents, 4));
+        dbg!("  soon to fetch {}", next_base!(parents, 4));
         hasher.update(data.get_node(next_base!(parents, 4), layer));
 
         // exp parents

@@ -1,11 +1,12 @@
+use crossbeam::channel;
 use std::fs;
 use std::io::{Read, Seek, Write};
-use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
 fn main() -> Result<(), failure::Error> {
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = channel::bounded(128);
+    let (sender_r, receiver_r) = channel::bounded(128);
 
     let start = Instant::now();
 
@@ -20,23 +21,37 @@ fn main() -> Result<(), failure::Error> {
             .unwrap();
 
         file.set_len(size).unwrap();
-        file.write(b"12345");
+        file.write(b"12345").unwrap();
         let mut buf = [0u8; 32];
 
-        for i in 0..1000 {
-            file.seek(std::io::SeekFrom::Start(i * 32)).unwrap();
-            file.read(&mut buf[..]).unwrap();
-            sender.send(buf.clone()).unwrap();
+        while let Ok(i) = receiver_r.recv() {
+            if i % 2 == 0 {
+                file.seek(std::io::SeekFrom::Start((i * 32) as u64))
+                    .unwrap();
+            } else {
+                file.seek(std::io::SeekFrom::End(-((i * 32) as i64)))
+                    .unwrap();
+            }
+            assert_eq!(file.read(&mut buf[..]).unwrap(), 32);
+            sender.send(buf).unwrap();
         }
     });
 
     let mut res = Vec::new();
-    for _i in 0..100 {
-        res.push(receiver.recv().unwrap());
+    for j in 0..10 * 1024 {
+        for i in j * 10..(j + 1) * 10 {
+            sender_r.send(i).unwrap();
+        }
+
+        for _i in j * 10..(j + 1) * 10 {
+            res.push(receiver.recv().unwrap());
+        }
     }
-    println!("res: {:?}", &res[0]);
+    println!("res: {:?}, {}", &res[0], res.len());
+    drop(sender_r);
+    handle.join().unwrap();
+
     println!("took {:0.4}ms", start.elapsed().as_millis());
 
-    handle.join().unwrap();
     Ok(())
 }

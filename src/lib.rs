@@ -1,12 +1,13 @@
-#![feature(async_await, async_closure)]
-
-use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::unix::fs::FileExt;
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
+use cached::Cached;
 use chrono::Utc;
+use crossbeam::channel;
 use memmap::{MmapMut, MmapOptions};
 
 use storage_proofs::hasher::Domain;
@@ -97,9 +98,10 @@ pub fn create_empty_file(file_path: &'static str, size: usize) -> Result<(), fai
 }
 
 pub struct AsyncData {
-    receiver: mpsc::Receiver<(usize, [u8; NODE_SIZE])>,
-    sender: mpsc::Sender<Request>,
+    sender: channel::Sender<Request>,
     handle: std::thread::JoinHandle<()>,
+    queue: channel::Receiver<(usize, [u8; NODE_SIZE])>,
+    blocked: Duration,
 }
 
 enum Request {
@@ -108,95 +110,354 @@ enum Request {
     Sync,
 }
 
+const MAX_SIZE: usize = 1024;
+
+fn load(
+    sender: &channel::Sender<(usize, [u8; NODE_SIZE])>,
+    file: &mut fs::File,
+    cache2: &mut lru::LruCache<usize, [u8; NODE_SIZE]>,
+    buf: &mut [u8; NODE_SIZE],
+    n: usize,
+    stats: &mut Stats,
+    seek_pos: &mut u64,
+) {
+    // println!("loading {}", n);
+
+    let start = Instant::now();
+    if let Some(d) = cache2.get(&n) {
+        stats.cache_hits += 1;
+        // println!("cache hit");
+        sender.send((n, *d)).unwrap();
+        stats.cache_reads += start.elapsed();
+    } else {
+        stats.cache_misses += 1;
+        let offset = (n * NODE_SIZE) as u64;
+        // println!("seek to: {} - {}", n, offset);
+        // let target = offset as i64 - *seek_pos as i64;
+        // let start = Instant::now();
+        // *seek_pos = file.seek(SeekFrom::Current(target)).unwrap();
+        // stats.seeks += start.elapsed();
+
+        let start = Instant::now();
+        file.read_exact_at(&mut buf[..], offset).unwrap();
+        stats.reads += start.elapsed();
+
+        sender.send((n, *buf)).unwrap();
+
+        cache2.put(n, *buf);
+
+        // println!("> wrote node {}", n);
+    };
+
+    // signal the arrival of a new element
+    // println!("> signal node {}", n);
+}
+
+#[derive(Debug, Default)]
+struct Stats {
+    cache_hits: usize,
+    cache_misses: usize,
+    reads: Duration,
+    seeks: Duration,
+    cache_reads: Duration,
+}
+
 impl AsyncData {
     pub fn new(file_path: &'static str, graph: Arc<Graph>) -> Result<Self, failure::Error> {
-        let (sender_req, receiver_req) = mpsc::channel();
-        let (sender_res, receiver_res) = mpsc::channel();
+        let (sender_req, receiver_req) = channel::bounded(512);
+        let (sender_res, receiver_res) = channel::bounded(1024);
 
         let handle = std::thread::spawn(move || {
+            let mut cache = lru::LruCache::new(MAX_SIZE);
+
             let mut file = fs::OpenOptions::new()
                 .write(true)
                 .read(true)
                 .open(file_path)
                 .expect("invalid file");
 
-            let mut cache: lru::LruCache<usize, [u8; NODE_SIZE]> = lru::LruCache::new(40);
-
             let mut buf = [0u8; NODE_SIZE];
+            let mut seek_pos = 0;
 
-            let load = |file: &mut fs::File,
-                        buf: &mut [u8; NODE_SIZE],
-                        cache: &mut lru::LruCache<usize, [u8; NODE_SIZE]>,
-                        n: usize| {
-                // println!("loading {}", n);
-                let res = if let Some(data) = cache.get(&n) {
-                    *data
-                } else {
-                    let offset = n * NODE_SIZE;
-                    file.seek(SeekFrom::Start(offset as u64)).unwrap();
-                    file.read_exact(&mut buf[..])
-                        .expect(&format!("invalid read at {} - {}", n, offset));
-                    *buf
-                };
+            let mut stats = Stats::default();
 
-                cache.put(n, res);
-                sender_res.send((n, res)).expect("failed to send");
-            };
+            let mut reads = Duration::new(0, 0);
+            let mut reads_cnt = 0;
 
             while let Ok(req) = receiver_req.recv() {
                 match req {
                     Request::Read(node, rev) => {
+                        let start = Instant::now();
+                        reads_cnt += 1;
+                        // println!("prefetch started for {}", node);
                         // WARNING: these loads must match exactly the usage pattern on the
                         // replication side
 
                         if rev {
                             // base parents
                             let parents = ParentsIterRev::new(graph.clone(), node);
-                            load(&mut file, &mut buf, &mut cache, next_base_rev!(parents, 0));
-                            load(&mut file, &mut buf, &mut cache, next_base_rev!(parents, 1));
-                            load(&mut file, &mut buf, &mut cache, next_base_rev!(parents, 2));
-                            load(&mut file, &mut buf, &mut cache, next_base_rev!(parents, 3));
-                            load(&mut file, &mut buf, &mut cache, next_base_rev!(parents, 4));
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_base_rev!(parents, 0),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_base_rev!(parents, 1),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_base_rev!(parents, 2),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_base_rev!(parents, 3),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_base_rev!(parents, 4),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
 
                             // exp parents
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 5));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 6));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 7));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 8));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 9));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 10));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 11));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 12));
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 5),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 6),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 7),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 8),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 9),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 10),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 11),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 12),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
                         } else {
                             let parents = ParentsIter::new(graph.clone(), node);
 
-                            load(&mut file, &mut buf, &mut cache, next_base!(parents, 0));
-                            load(&mut file, &mut buf, &mut cache, next_base!(parents, 1));
-                            load(&mut file, &mut buf, &mut cache, next_base!(parents, 2));
-                            load(&mut file, &mut buf, &mut cache, next_base!(parents, 3));
-                            load(&mut file, &mut buf, &mut cache, next_base!(parents, 4));
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_base!(parents, 0),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_base!(parents, 1),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_base!(parents, 2),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_base!(parents, 3),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_base!(parents, 4),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
                             // exp parents
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 5));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 6));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 7));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 8));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 9));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 10));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 11));
-                            load(&mut file, &mut buf, &mut cache, next_exp!(parents, 12));
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 5),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 6),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 7),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 8),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 9),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 10),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 11),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
+                            load(
+                                &sender_res,
+                                &mut file,
+                                &mut cache,
+                                &mut buf,
+                                next_exp!(parents, 12),
+                                &mut stats,
+                                &mut seek_pos,
+                            );
                         }
                         // node itself
-                        load(&mut file, &mut buf, &mut cache, node);
+                        load(
+                            &sender_res,
+                            &mut file,
+                            &mut cache,
+                            &mut buf,
+                            node,
+                            &mut stats,
+                            &mut seek_pos,
+                        );
+                        reads += start.elapsed();
                     }
                     Request::Write(node, data) => {
                         // update cache
-                        cache.pop(&node);
                         cache.put(node, data);
 
                         // write to disk
-                        let offset = node * NODE_SIZE;
-                        file.seek(SeekFrom::Start(offset as u64)).unwrap();
-                        assert_eq!(file.write(&data).unwrap(), NODE_SIZE);
+                        let offset = (node * NODE_SIZE) as u64;
+                        // let target = offset as i64 - seek_pos as i64;
+                        // seek_pos = file.seek(SeekFrom::Current(target)).unwrap();
+                        file.write_all_at(&data, offset).unwrap();
                     }
                     Request::Sync => {
                         file.sync_data().unwrap();
@@ -204,26 +465,41 @@ impl AsyncData {
                     }
                 }
             }
+            println!(
+                "reads took {:0.4}ms for {} reads",
+                reads.as_millis(),
+                reads_cnt
+            );
+            println!("cache_hits: {}", stats.cache_hits);
+            println!("cache_misses: {}", stats.cache_misses);
+            println!("disk reads took {:0.4}ms", stats.reads.as_millis(),);
+            println!("disk seeks took {:0.4}ms", stats.seeks.as_millis(),);
+            println!(
+                "disk cache reads took {:0.4}ms",
+                stats.cache_reads.as_millis(),
+            );
         });
 
         Ok(AsyncData {
-            receiver: receiver_res,
             sender: sender_req,
             handle,
+            queue: receiver_res,
+            blocked: Duration::new(0, 0),
         })
     }
 
     pub fn prefetch(&mut self, node: usize, rev: bool) {
-        // println!("prefetching {}", node);
+        //println!("< prefetch for node ({})", node);
         self.sender.send(Request::Read(node, rev)).unwrap();
     }
 
-    pub fn get_node(&mut self, _node: usize) -> [u8; NODE_SIZE] {
-        // println!("get node {}", node);
-
-        let (_node_recv, buf) = self.receiver.recv().unwrap();
-        // assert_eq!(node, node_recv);
-        buf
+    pub fn get_node(&mut self, node: usize) -> [u8; NODE_SIZE] {
+        // println!("< get node ({})", node);
+        let start = Instant::now();
+        let (n, d) = self.queue.recv().unwrap();
+        assert_eq!(node, n);
+        self.blocked += start.elapsed();
+        d
     }
 
     pub fn write_node(&mut self, node: usize, data: [u8; NODE_SIZE]) {
@@ -231,6 +507,7 @@ impl AsyncData {
     }
 
     pub fn flush(self) {
+        println!("blocked {:0.4}ms", self.blocked.as_millis());
         self.sender.send(Request::Sync).unwrap();
         self.handle.join().unwrap();
     }

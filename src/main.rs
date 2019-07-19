@@ -11,8 +11,8 @@ async fn main() {
     // Compute replica_id
     let replica_id = id_from_str::<<Blake2sHasher as Hasher>::Domain>("aaaa");
     // Generate a file full of zeroes to be replicated
-    let mut data = file_backed_mmap_from_zeroes(NODES, true);
+    let mut data = file_backed_mmap_from_zeroes(NODES, false);
     // Start replication
-    println!("Starting replication");
+    println!("Starting replication {} nodes", NODES);
     replicate::r2::<Blake2sHasher>(&replica_id, &mut data, &gg)
 }

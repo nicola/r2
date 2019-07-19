@@ -8,20 +8,30 @@ use storage_proofs::fr32::bytes_into_fr_repr_safe;
 use storage_proofs::hasher::{Domain, Hasher};
 
 use crate::graph::{Graph, ParentsIter, ParentsIterRev};
+use crate::prefetch::DataPrefetch;
 use crate::{BASE_PARENTS, LAYERS, NODES, NODE_SIZE};
 
 macro_rules! replicate_layer {
     ($graph:expr, $replica_id:expr, $layer:expr, $data:expr) => {
-        print!("Replicating layer {}", $layer);
+        println!("Replicating layer {}", $layer);
         let start = Instant::now();
 
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update($replica_id.as_ref());
 
+        // Var that has current fetched nodes
+        let mut data_curr = &mut DataPrefetch::new();
+        let mut data_next = &mut DataPrefetch::new();
+
+        data_curr.prefetch($graph, 0, $layer);
         for node in 0..NODES {
+            println!("encode node {}", node);
+            if node < NODES - 1 {
+                data_next.prefetch($graph, node + 1, $layer);
+            }
             let parents = ParentsIter::new($graph, node);
             // Compute `key` from `parents`
-            let key = create_key::<H>(&parents, node, $data, hasher.clone());
+            let key = create_key::<H>(&parents, node, data_curr, hasher.clone(), $layer);
 
             // Get the `unencoded` node
             let start = data_at_node_offset(node);
@@ -37,6 +47,12 @@ macro_rules! replicate_layer {
             encoded
                 .write_bytes(&mut $data[start..end])
                 .expect("failed to write");
+
+            let tmp1 = data_curr;
+            let tmp2 = data_next;
+            data_curr = tmp2;
+            data_next = tmp1;
+            data_next.clear();
         }
         println!(" ... took {:0.4}ms", start.elapsed().as_millis());
     };
@@ -44,7 +60,7 @@ macro_rules! replicate_layer {
 
 macro_rules! replicate_layer_rev {
     ($graph:expr, $replica_id:expr, $layer:expr, $data:expr) => {
-        print!("Replicating layer {}", $layer);
+        println!("Replicating layer {}", $layer);
         let start = Instant::now();
 
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
@@ -130,33 +146,38 @@ macro_rules! next_exp {
 fn create_key<H: Hasher>(
     parents: &ParentsIter,
     node: usize,
-    data: &[u8],
+    data: &mut DataPrefetch,
     mut hasher: State,
+    layer: usize,
 ) -> H::Domain {
     // compile time fixed at 5 + 8 = 13 parents
 
     // The hash is about the parents, hence skip if a node doesn't have any parents
     let p0 = next_base!(parents, 0);
     if node != p0 {
-        // hash first parent
-        let offset = data_at_node_offset(p0);
-        hasher.update(&unsafe { data.get_unchecked(offset..offset + NODE_SIZE) });
+        // hash first parentget_node
+        println!("  soon to fetch {}", node);
+        hasher.update(data.get_node(node, layer));
 
         // base parents
-        hash!(next_base!(parents, 1), hasher, data);
-        hash!(next_base!(parents, 2), hasher, data);
-        hash!(next_base!(parents, 3), hasher, data);
-        hash!(next_base!(parents, 4), hasher, data);
+        println!("  soon to fetch {}", next_base!(parents, 1));
+        hasher.update(data.get_node(next_base!(parents, 1), layer));
+        println!("  soon to fetch {}", next_base!(parents, 2));
+        hasher.update(data.get_node(next_base!(parents, 2), layer));
+        println!("  soon to fetch {}", next_base!(parents, 3));
+        hasher.update(data.get_node(next_base!(parents, 3), layer));
+        println!("  soon to fetch {}", next_base!(parents, 4));
+        hasher.update(data.get_node(next_base!(parents, 4), layer));
 
         // exp parents
-        hash!(next_exp!(parents, 5), hasher, data);
-        hash!(next_exp!(parents, 6), hasher, data);
-        hash!(next_exp!(parents, 7), hasher, data);
-        hash!(next_exp!(parents, 8), hasher, data);
-        hash!(next_exp!(parents, 9), hasher, data);
-        hash!(next_exp!(parents, 10), hasher, data);
-        hash!(next_exp!(parents, 11), hasher, data);
-        hash!(next_exp!(parents, 12), hasher, data);
+        hasher.update(data.get_node(next_exp!(parents, 5), layer));
+        hasher.update(data.get_node(next_exp!(parents, 6), layer));
+        hasher.update(data.get_node(next_exp!(parents, 7), layer));
+        hasher.update(data.get_node(next_exp!(parents, 8), layer));
+        hasher.update(data.get_node(next_exp!(parents, 9), layer));
+        hasher.update(data.get_node(next_exp!(parents, 10), layer));
+        hasher.update(data.get_node(next_exp!(parents, 11), layer));
+        hasher.update(data.get_node(next_exp!(parents, 12), layer));
     }
 
     let hash = hasher.finalize();

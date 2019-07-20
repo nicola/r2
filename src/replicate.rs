@@ -57,17 +57,17 @@ macro_rules! replicate_layer {
         let mut write_time = Duration::new(0, 0);
 
         // prefetch first node
-        $data.prefetch(0, false);
-        $data.prefetch(1, false);
-        $data.prefetch(2, false);
-        $data.prefetch(3, false);
+        $data.prefetch(0, $layer, false);
+        $data.prefetch(1, $layer, false);
+        $data.prefetch(2, $layer, false);
+        $data.prefetch(3, $layer, false);
 
         for node in 0..NODES {
             // println!("--round {}", node);
 
             // prefetch next node
             if node < NODES - 4 {
-                $data.prefetch(node + 4, false);
+                $data.prefetch(node + 4, $layer, false);
             }
 
             let parents = ParentsIter::new($graph.clone(), node);
@@ -75,12 +75,12 @@ macro_rules! replicate_layer {
             let start = Instant::now();
             // println!("-- key {}", node);
             // Compute `key` from `parents`
-            let key = create_key::<H>(&parents, node, $data, hasher.clone());
+            let key = create_key::<H>(&parents, node, $layer, $data, hasher.clone());
             key_dur += start.elapsed();
 
             // println!("-- raw node {}", node);
             // Get the `unencoded` node
-            let mut raw_node_data = $data.get_node(node);
+            let mut raw_node_data = $data.get_node(node, $layer);
             let node_data = H::Domain::try_from_bytes(&raw_node_data).unwrap();
             let mut node_fr: Fr = node_data.into();
 
@@ -91,7 +91,7 @@ macro_rules! replicate_layer {
             let start = Instant::now();
             // Store the `encoded` data
             encoded.write_bytes(&mut raw_node_data).unwrap();
-            $data.write_node(node, raw_node_data);
+            $data.write_node(node, $layer, raw_node_data);
             write_time += start.elapsed();
         }
 
@@ -177,14 +177,15 @@ where
 }
 
 macro_rules! hash {
-    ($parent:expr, $hasher:expr, $data:expr) => {
-        $hasher.update(&$data.get_node($parent));
+    ($parent:expr, $layer: expr, $hasher:expr, $data:expr) => {
+        $hasher.update(&$data.get_node($parent, $layer));
     };
 }
 
 fn create_key<'a, H: Hasher>(
     parents: &'a ParentsIter,
     node: usize,
+    layer: usize,
     data: &'a mut AsyncData,
     mut hasher: State,
 ) -> H::Domain {
@@ -194,21 +195,21 @@ fn create_key<'a, H: Hasher>(
     let p0 = next_base!(parents, 0);
     // if node != p0 {
     // base parents
-    hasher.update(&data.get_node(p0));
-    hash!(next_base!(parents, 1), hasher, data);
-    hash!(next_base!(parents, 2), hasher, data);
-    hash!(next_base!(parents, 3), hasher, data);
-    hash!(next_base!(parents, 4), hasher, data);
+    hasher.update(&data.get_node(p0, layer));
+    hash!(next_base!(parents, 1), layer, hasher, data);
+    hash!(next_base!(parents, 2), layer, hasher, data);
+    hash!(next_base!(parents, 3), layer, hasher, data);
+    hash!(next_base!(parents, 4), layer, hasher, data);
 
     // exp parents
-    hash!(next_exp!(parents, 5), hasher, data);
-    hash!(next_exp!(parents, 6), hasher, data);
-    hash!(next_exp!(parents, 7), hasher, data);
-    hash!(next_exp!(parents, 8), hasher, data);
-    hash!(next_exp!(parents, 9), hasher, data);
-    hash!(next_exp!(parents, 10), hasher, data);
-    hash!(next_exp!(parents, 11), hasher, data);
-    hash!(next_exp!(parents, 12), hasher, data);
+    hash!(next_exp!(parents, 5), layer, hasher, data);
+    hash!(next_exp!(parents, 6), layer, hasher, data);
+    hash!(next_exp!(parents, 7), layer, hasher, data);
+    hash!(next_exp!(parents, 8), layer, hasher, data);
+    hash!(next_exp!(parents, 9), layer, hasher, data);
+    hash!(next_exp!(parents, 10), layer, hasher, data);
+    hash!(next_exp!(parents, 11), layer, hasher, data);
+    hash!(next_exp!(parents, 12), layer , hasher, data);
     // }
 
     let hash = hasher.finalize();
@@ -218,6 +219,7 @@ fn create_key<'a, H: Hasher>(
 fn create_key_rev<'a, H: Hasher>(
     parents: &'a ParentsIterRev,
     node: usize,
+    layer: usize,
     data: &'a mut AsyncData,
     mut hasher: State,
 ) -> H::Domain {
@@ -227,23 +229,23 @@ fn create_key_rev<'a, H: Hasher>(
     let p0 = next_base_rev!(parents, 0);
     //  if node != p0 {
     // hash first parent
-    hasher.update(&data.get_node(p0));
+    hasher.update(&data.get_node(p0, layer));
 
     // base parents
-    hash!(next_base_rev!(parents, 1), hasher, data);
-    hash!(next_base_rev!(parents, 2), hasher, data);
-    hash!(next_base_rev!(parents, 3), hasher, data);
-    hash!(next_base_rev!(parents, 4), hasher, data);
+    hash!(next_base_rev!(parents, 1), layer, hasher, data);
+    hash!(next_base_rev!(parents, 2), layer, hasher, data);
+    hash!(next_base_rev!(parents, 3), layer, hasher, data);
+    hash!(next_base_rev!(parents, 4), layer, hasher, data);
 
     // exp parents
-    hash!(next_exp!(parents, 5), hasher, data);
-    hash!(next_exp!(parents, 6), hasher, data);
-    hash!(next_exp!(parents, 7), hasher, data);
-    hash!(next_exp!(parents, 8), hasher, data);
-    hash!(next_exp!(parents, 9), hasher, data);
-    hash!(next_exp!(parents, 10), hasher, data);
-    hash!(next_exp!(parents, 11), hasher, data);
-    hash!(next_exp!(parents, 12), hasher, data);
+    hash!(next_exp!(parents, 5), layer, hasher, data);
+    hash!(next_exp!(parents, 6), layer, hasher, data);
+    hash!(next_exp!(parents, 7), layer, hasher, data);
+    hash!(next_exp!(parents, 8), layer, hasher, data);
+    hash!(next_exp!(parents, 9), layer, hasher, data);
+    hash!(next_exp!(parents, 10), layer, hasher, data);
+    hash!(next_exp!(parents, 11), layer, hasher, data);
+    hash!(next_exp!(parents, 12), layer, hasher, data);
     // }
 
     let hash = hasher.finalize();

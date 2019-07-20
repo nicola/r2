@@ -19,7 +19,7 @@ pub mod graph;
 pub mod replicate;
 
 /// Size of the data to encode
-pub const DATA_SIZE: usize = 10 * 1024 * 1024; // * 1024;
+pub const DATA_SIZE: usize = 1 * 1024 * 1024; // * 1024;
 /// Size of each node in the graph
 pub const NODE_SIZE: usize = 32;
 /// Number of layers in ZigZag
@@ -72,7 +72,7 @@ pub fn file_backed_mmap_from_zeroes(n: usize, use_tmp: bool) -> MmapMut {
             .unwrap()
     };
 
-    file.set_len(32 * n as u64).unwrap();
+    file.set_len((32 * n * (LAYERS + 1)) as u64).unwrap();
 
     unsafe { MmapOptions::new().map_mut(&file).unwrap() }
 }
@@ -93,45 +93,46 @@ pub fn create_empty_file(file_path: &'static str, size: usize) -> Result<(), fai
         .write(true)
         .read(true)
         .open(file_path)?;
-    file.set_len(size as u64)?;
+    file.set_len((size*(LAYERS + 1)) as u64)?;
     Ok(())
 }
 
 pub struct AsyncData {
     sender: channel::Sender<Request>,
     handle: std::thread::JoinHandle<()>,
-    queue: channel::Receiver<(usize, [u8; NODE_SIZE])>,
+    queue: channel::Receiver<(usize, usize, [u8; NODE_SIZE])>,
     blocked: Duration,
 }
 
 enum Request {
-    Read(usize, bool),
-    Write(usize, [u8; NODE_SIZE]),
+    Read(usize, usize, bool),
+    Write(usize, usize, [u8; NODE_SIZE]),
     Sync,
 }
 
-const MAX_SIZE: usize = 1024;
+const MAX_SIZE: usize = 1024 * 1024;
 
 fn load(
-    sender: &channel::Sender<(usize, [u8; NODE_SIZE])>,
+    sender: &channel::Sender<(usize, usize, [u8; NODE_SIZE])>,
     file: &mut fs::File,
-    cache2: &mut lru::LruCache<usize, [u8; NODE_SIZE]>,
+    cache2: &mut lru::LruCache<(usize, usize), [u8; NODE_SIZE]>,
     buf: &mut [u8; NODE_SIZE],
     n: usize,
+    l: usize,
     stats: &mut Stats,
     seek_pos: &mut u64,
 ) {
     // println!("loading {}", n);
 
     let start = Instant::now();
-    if let Some(d) = cache2.get(&n) {
+    if let Some(d) = cache2.get(&(n,l)) {
         stats.cache_hits += 1;
         // println!("cache hit");
-        sender.send((n, *d)).unwrap();
+        sender.send((n, l, *d)).unwrap();
         stats.cache_reads += start.elapsed();
     } else {
         stats.cache_misses += 1;
-        let offset = (n * NODE_SIZE) as u64;
+        let offset = (n * NODE_SIZE + (l+1) * NODES * NODE_SIZE) as u64;
         // println!("seek to: {} - {}", n, offset);
         // let target = offset as i64 - *seek_pos as i64;
         // let start = Instant::now();
@@ -142,9 +143,9 @@ fn load(
         file.read_exact_at(&mut buf[..], offset).unwrap();
         stats.reads += start.elapsed();
 
-        sender.send((n, *buf)).unwrap();
+        sender.send((n, l, *buf)).unwrap();
 
-        cache2.put(n, *buf);
+        cache2.put((n, l), *buf);
 
         // println!("> wrote node {}", n);
     };
@@ -186,7 +187,7 @@ impl AsyncData {
 
             while let Ok(req) = receiver_req.recv() {
                 match req {
-                    Request::Read(node, rev) => {
+                    Request::Read(node, layer, rev) => {
                         let start = Instant::now();
                         reads_cnt += 1;
                         // println!("prefetch started for {}", node);
@@ -202,6 +203,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_base_rev!(parents, 0),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -211,6 +213,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_base_rev!(parents, 1),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -220,6 +223,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_base_rev!(parents, 2),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -229,6 +233,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_base_rev!(parents, 3),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -238,6 +243,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_base_rev!(parents, 4),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -249,6 +255,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 5),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -258,6 +265,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 6),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -267,6 +275,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 7),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -276,6 +285,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 8),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -285,6 +295,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 9),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -294,6 +305,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 10),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -303,6 +315,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 11),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -312,6 +325,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 12),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -324,6 +338,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_base!(parents, 0),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -333,6 +348,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_base!(parents, 1),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -342,6 +358,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_base!(parents, 2),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -351,6 +368,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_base!(parents, 3),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -360,6 +378,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_base!(parents, 4),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -370,6 +389,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 5),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -379,6 +399,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 6),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -388,6 +409,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 7),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -397,6 +419,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 8),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -406,6 +429,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 9),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -415,6 +439,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 10),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -424,6 +449,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 11),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -433,6 +459,7 @@ impl AsyncData {
                                 &mut cache,
                                 &mut buf,
                                 next_exp!(parents, 12),
+                                layer,
                                 &mut stats,
                                 &mut seek_pos,
                             );
@@ -444,17 +471,18 @@ impl AsyncData {
                             &mut cache,
                             &mut buf,
                             node,
+                            layer-1,
                             &mut stats,
                             &mut seek_pos,
                         );
                         reads += start.elapsed();
                     }
-                    Request::Write(node, data) => {
+                    Request::Write(node, layer, data) => {
                         // update cache
-                        cache.put(node, data);
+                        cache.put((node, layer), data);
 
                         // write to disk
-                        let offset = (node * NODE_SIZE) as u64;
+                        let offset = (node * NODE_SIZE + (layer+1)*NODES*NODE_SIZE) as u64;
                         // let target = offset as i64 - seek_pos as i64;
                         // seek_pos = file.seek(SeekFrom::Current(target)).unwrap();
                         file.write_all_at(&data, offset).unwrap();
@@ -488,22 +516,22 @@ impl AsyncData {
         })
     }
 
-    pub fn prefetch(&mut self, node: usize, rev: bool) {
+    pub fn prefetch(&mut self, node: usize, layer: usize, rev: bool) {
         //println!("< prefetch for node ({})", node);
-        self.sender.send(Request::Read(node, rev)).unwrap();
+        self.sender.send(Request::Read(node, layer, rev)).unwrap();
     }
 
-    pub fn get_node(&mut self, node: usize) -> [u8; NODE_SIZE] {
+    pub fn get_node(&mut self, node: usize, layer: usize) -> [u8; NODE_SIZE] {
         // println!("< get node ({})", node);
         let start = Instant::now();
-        let (n, d) = self.queue.recv().unwrap();
+        let (n, l, d) = self.queue.recv().unwrap();
         assert_eq!(node, n);
         self.blocked += start.elapsed();
         d
     }
 
-    pub fn write_node(&mut self, node: usize, data: [u8; NODE_SIZE]) {
-        self.sender.send(Request::Write(node, data)).unwrap();
+    pub fn write_node(&mut self, node: usize, layer: usize, data: [u8; NODE_SIZE]) {
+        self.sender.send(Request::Write(node, layer, data)).unwrap();
     }
 
     pub fn flush(self) {

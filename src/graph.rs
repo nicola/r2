@@ -4,16 +4,12 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::Write;
 
-use blake2s_simd::{Params as Blake2s, State};
 use rand::{ChaChaRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use storage_proofs::crypto::feistel;
-use storage_proofs::fr32::bytes_into_fr_repr_safe;
-use storage_proofs::hasher::{Domain, Hasher};
-use storage_proofs::util::data_at_node_offset;
 
-use crate::{BASE_PARENTS, EXP_PARENTS, NODES, NODE_SIZE, PARENT_SIZE, SEED};
+use crate::{BASE_PARENTS, EXP_PARENTS, NODES, SEED};
 
 /// A Graph holds settings and cache
 #[derive(Serialize, Deserialize)]

@@ -1,10 +1,10 @@
 use std::time::Instant;
 
 use blake2s_simd::{Params as Blake2s, State};
-use ff::Field;
-use paired::bls12_381::Fr;
+use ff::PrimeFieldRepr;
+use paired::bls12_381::FrRepr;
 use storage_proofs::fr32::bytes_into_fr_repr_safe;
-use storage_proofs::hasher::{Domain, Hasher};
+use storage_proofs::hasher::Hasher;
 
 use crate::graph::{Graph, ParentsIter, ParentsIterRev};
 use crate::{BASE_PARENTS, NODES, NODE_SIZE};
@@ -22,6 +22,11 @@ macro_rules! replicate_layer {
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update($replica_id.as_ref());
 
+        let modulus: FrRepr = FrRepr([0xffffffff00000001,
+                                      0x53bda402fffe5bfe,
+                                      0x3339d80809a1d805,
+                                      0x73eda753299d7d48]);
+
         for node in 0..NODES {
             let parents = ParentsIter::new($graph, node);
             // Compute `key` from `parents`
@@ -33,22 +38,18 @@ macro_rules! replicate_layer {
             // Get the `unencoded` node
             let start = data_at_node_offset(node);
             let end = start + NODE_SIZE;
-            let node_data = H::Domain::try_from_bytes(&$data[start..end]).expect("invalid data");
-            let mut node_fr: Fr = node_data.into();
-
-            // Compute the `encoded` node by adding the `key` to it
-            node_fr.add_assign(&key.into());
-            let encoded: H::Domain = node_fr.into();
-
-            // Store the `encoded` data
-            encoded
-                .write_bytes(&mut $data[start..end])
-                .expect("failed to write");
+            let mut br = FrRepr::default();
+            br.read_le(&$data[start..end]).unwrap();
+            br.add_nocarry(&key);
+            if br >= modulus {
+               br.sub_noborrow(&modulus);
+            }
+            br.write_le(&mut $data[start..end]).unwrap();
         }
         let tsc1 = tsc::rdtsc();
         let total_cycles = tsc1-tsc0;
         let cyc_per_byte = (total_cycles as f64) / (tot_bytes as f64);
-        println!("encoding tsc cyc/byte {cb:>width$}", cb=cyc_per_byte, width=12);
+        println!(" encoding tsc cyc/byte {cb:>width$}", cb=cyc_per_byte, width=12);
         println!(" ... took {:0.4}ms", start.elapsed().as_millis());
     };
 }
@@ -64,6 +65,10 @@ macro_rules! replicate_layer_rev {
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update($replica_id.as_ref());
 
+        let modulus: FrRepr = FrRepr([0xffffffff00000001,
+                                      0x53bda402fffe5bfe,
+                                      0x3339d80809a1d805,
+                                      0x73eda753299d7d48]);
         for node in 0..NODES {
             let parents = ParentsIterRev::new($graph, node);
             // Compute `key` from `parents`
@@ -76,17 +81,13 @@ macro_rules! replicate_layer_rev {
             // Get the `unencoded` node
             let start = data_at_node_offset(node);
             let end = start + NODE_SIZE;
-            let node_data = H::Domain::try_from_bytes(&$data[start..end]).expect("invalid data");
-            let mut node_fr: Fr = node_data.into();
-
-            // Compute the `encoded` node by adding the `key` to it
-            node_fr.add_assign(&key.into());
-            let encoded: H::Domain = node_fr.into();
-
-            // Store the `encoded` data
-            encoded
-                .write_bytes(&mut $data[start..end])
-                .expect("failed to write");
+            let mut br = FrRepr::default();
+            br.read_le(&$data[start..end]).unwrap();
+            br.add_nocarry(&key);
+            if br >= modulus {
+               br.sub_noborrow(&modulus);
+            }
+            br.write_le(&mut $data[start..end]).unwrap();
         }
         let tsc1 = tsc::rdtsc();
         let total_cycles = tsc1-tsc0;
@@ -147,7 +148,7 @@ fn create_key<H: Hasher>(
     data: &[u8],
     hasher: State,
     replica_id: &[u8],
-) -> (H::Domain, u64) {
+) -> (FrRepr, u64) {
     // compile time fixed at 5 + 8 = 13 parents
     // The hash is about the parents, skip if a node doesn't have any parents
     let p0 = next_base!(parents, 0);
@@ -184,12 +185,12 @@ fn create_key<H: Hasher>(
 
         let hash = blake2s_filecoin::hash_nodes_14(&all_parents);
 
-        (bytes_into_fr_repr_safe(hash.as_ref()).into(), 448)
+        (bytes_into_fr_repr_safe(hash.as_ref()), 448)
     }
     else {
         let count = hasher.count();
         let hash = hasher.finalize();
-        (bytes_into_fr_repr_safe(hash.as_ref()).into(), count)
+        (bytes_into_fr_repr_safe(hash.as_ref()), count)
     }
 }
 
@@ -199,7 +200,7 @@ fn create_key_rev<H: Hasher>(
     data: &[u8],
     hasher: State,
     replica_id: &[u8],
-) -> (H::Domain, u64) {
+) -> (FrRepr, u64) {
     // compile time fixed at 5 + 8 = 13 parents
     // The hash is about the parents, skip if a node doesn't have any parents
     let p0 = next_base_rev!(parents, 0);
@@ -235,12 +236,12 @@ fn create_key_rev<H: Hasher>(
                ];
 
         let hash = blake2s_filecoin::hash_nodes_14(&all_parents);
-        (bytes_into_fr_repr_safe(hash.as_ref()).into(), 448)
+        (bytes_into_fr_repr_safe(hash.as_ref()), 448)
     }
     else {
         let count = hasher.count();
         let hash = hasher.finalize();
-        (bytes_into_fr_repr_safe(hash.as_ref()).into(), count)
+        (bytes_into_fr_repr_safe(hash.as_ref()), count)
     }
 }
 

@@ -1,6 +1,19 @@
 extern crate r2;
 use r2::{file_backed_mmap_from_zeroes, graph, id_from_str, replicate, NODES};
+use gperftools::profiler::PROFILER;
 use storage_proofs::hasher::{Blake2sHasher, Hasher};
+
+fn start_profile(stage: &str) {
+    PROFILER
+        .lock()
+        .unwrap()
+        .start(format!("./{}.profile", stage))
+        .unwrap();
+}
+
+fn stop_profile() {
+   PROFILER.lock().unwrap().stop().unwrap();
+}
 
 fn main() {
     // Load the graph from memory or generate a new one
@@ -11,5 +24,7 @@ fn main() {
     let mut data = file_backed_mmap_from_zeroes(NODES, true);
     // Start replication
     println!("Starting replication");
-    replicate::r2::<Blake2sHasher>(&replica_id, &mut data, &gg)
+    start_profile("replicate");
+    replicate::r2::<Blake2sHasher>(&replica_id, &mut data, &gg);
+    stop_profile();
 }

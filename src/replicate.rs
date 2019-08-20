@@ -1,43 +1,55 @@
 use std::time::Instant;
 
 use blake2s_simd::{Params as Blake2s, State};
-use ff::Field;
-use paired::bls12_381::Fr;
-use storage_proofs::error::Result;
+use ff::PrimeFieldRepr;
+use paired::bls12_381::FrRepr;
 use storage_proofs::fr32::bytes_into_fr_repr_safe;
-use storage_proofs::hasher::{Domain, Hasher};
+use storage_proofs::hasher::Hasher;
 
 use crate::graph::{Graph, ParentsIter, ParentsIterRev};
-use crate::{BASE_PARENTS, LAYERS, NODES, NODE_SIZE};
+use crate::{BASE_PARENTS, NODES, NODE_SIZE};
+use crate::tsc;
+use blake2s_filecoin;	
 
 macro_rules! replicate_layer {
     ($graph:expr, $replica_id:expr, $layer:expr, $data:expr) => {
         print!("Replicating layer {}", $layer);
         let start = Instant::now();
 
+        let tsc0 = tsc::rdtsc();
+        let mut tot_bytes : u64 = 0;
+
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update($replica_id.as_ref());
+
+        let modulus: FrRepr = FrRepr([0xffffffff00000001,
+                                      0x53bda402fffe5bfe,
+                                      0x3339d80809a1d805,
+                                      0x73eda753299d7d48]);
 
         for node in 0..NODES {
             let parents = ParentsIter::new($graph, node);
             // Compute `key` from `parents`
-            let key = create_key::<H>(&parents, node, $data, hasher.clone());
+            let (key, count) = create_key::<H>(&parents, node, $data, 
+                                               hasher.clone(), 
+                                               $replica_id.as_ref());
+            tot_bytes += count;
 
             // Get the `unencoded` node
             let start = data_at_node_offset(node);
             let end = start + NODE_SIZE;
-            let node_data = H::Domain::try_from_bytes(&$data[start..end]).expect("invalid data");
-            let mut node_fr: Fr = node_data.into();
-
-            // Compute the `encoded` node by adding the `key` to it
-            node_fr.add_assign(&key.into());
-            let encoded: H::Domain = node_fr.into();
-
-            // Store the `encoded` data
-            encoded
-                .write_bytes(&mut $data[start..end])
-                .expect("failed to write");
+            let mut br = FrRepr::default();
+            br.read_le(&$data[start..end]).unwrap();
+            br.add_nocarry(&key);
+            if br >= modulus {
+               br.sub_noborrow(&modulus);
+            }
+            br.write_le(&mut $data[start..end]).unwrap();
         }
+        let tsc1 = tsc::rdtsc();
+        let total_cycles = tsc1-tsc0;
+        let cyc_per_byte = (total_cycles as f64) / (tot_bytes as f64);
+        println!(" encoding tsc cyc/byte {cb:>width$}", cb=cyc_per_byte, width=12);
         println!(" ... took {:0.4}ms", start.elapsed().as_millis());
     };
 }
@@ -47,30 +59,40 @@ macro_rules! replicate_layer_rev {
         print!("Replicating layer {}", $layer);
         let start = Instant::now();
 
+        let tsc0 = tsc::rdtsc();
+        let mut tot_bytes : u64 = 0;
+
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update($replica_id.as_ref());
 
+        let modulus: FrRepr = FrRepr([0xffffffff00000001,
+                                      0x53bda402fffe5bfe,
+                                      0x3339d80809a1d805,
+                                      0x73eda753299d7d48]);
         for node in 0..NODES {
             let parents = ParentsIterRev::new($graph, node);
             // Compute `key` from `parents`
-            let key = create_key_rev::<H>(&parents, node, $data, hasher.clone());
+            let (key, count) = create_key_rev::<H>(&parents, node, $data, 
+                                                   hasher.clone(), 
+                                                   $replica_id.as_ref());
+
+            tot_bytes += count;
 
             // Get the `unencoded` node
             let start = data_at_node_offset(node);
             let end = start + NODE_SIZE;
-            let node_data = H::Domain::try_from_bytes(&$data[start..end]).expect("invalid data");
-            let mut node_fr: Fr = node_data.into();
-
-            // Compute the `encoded` node by adding the `key` to it
-            node_fr.add_assign(&key.into());
-            let encoded: H::Domain = node_fr.into();
-
-            // Store the `encoded` data
-            encoded
-                .write_bytes(&mut $data[start..end])
-                .expect("failed to write");
+            let mut br = FrRepr::default();
+            br.read_le(&$data[start..end]).unwrap();
+            br.add_nocarry(&key);
+            if br >= modulus {
+               br.sub_noborrow(&modulus);
+            }
+            br.write_le(&mut $data[start..end]).unwrap();
         }
-
+        let tsc1 = tsc::rdtsc();
+        let total_cycles = tsc1-tsc0;
+        let cyc_per_byte = (total_cycles as f64) / (tot_bytes as f64);
+        println!("encoding tsc cyc/byte {cb:>width$}", cb=cyc_per_byte, width=12);
         println!(" ... took {:0.4}ms", start.elapsed().as_millis());
     };
 }
@@ -99,13 +121,6 @@ where
     replicate_layer_rev!(g, replica_id, 9, data);
 }
 
-macro_rules! hash {
-    ($parent:expr, $hasher:expr, $data:expr) => {
-        let offset = data_at_node_offset($parent);
-        $hasher.update(&unsafe { $data.get_unchecked(offset..offset + NODE_SIZE) });
-    };
-}
-
 macro_rules! next_base {
     ($parents:expr, $index:expr) => {
         // safe as we statically know this is fine. compiler, why don't you?
@@ -131,72 +146,103 @@ fn create_key<H: Hasher>(
     parents: &ParentsIter,
     node: usize,
     data: &[u8],
-    mut hasher: State,
-) -> H::Domain {
+    hasher: State,
+    replica_id: &[u8],
+) -> (FrRepr, u64) {
     // compile time fixed at 5 + 8 = 13 parents
-
-    // The hash is about the parents, hence skip if a node doesn't have any parents
+    // The hash is about the parents, skip if a node doesn't have any parents
     let p0 = next_base!(parents, 0);
     if node != p0 {
-        // hash first parent
-        let offset = data_at_node_offset(p0);
-        hasher.update(&unsafe { data.get_unchecked(offset..offset + NODE_SIZE) });
+        let offset    = data_at_node_offset(p0);
+        let offset_1  = data_at_node_offset(next_base!(parents, 1));
+        let offset_2  = data_at_node_offset(next_base!(parents, 2));
+        let offset_3  = data_at_node_offset(next_base!(parents, 3));
+        let offset_4  = data_at_node_offset(next_base!(parents, 4));
+        let offset_5  = data_at_node_offset(next_exp!(parents, 5));
+        let offset_6  = data_at_node_offset(next_exp!(parents, 6));
+        let offset_7  = data_at_node_offset(next_exp!(parents, 7));
+        let offset_8  = data_at_node_offset(next_exp!(parents, 8));
+        let offset_9  = data_at_node_offset(next_exp!(parents, 9));
+        let offset_10 = data_at_node_offset(next_exp!(parents, 10));
+        let offset_11 = data_at_node_offset(next_exp!(parents, 11));
+        let offset_12 = data_at_node_offset(next_exp!(parents, 12));
+        let all_parents: [&[u8]; 14] = [
+               replica_id,
+               &unsafe { data.get_unchecked(offset..offset + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_1..offset_1 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_2..offset_2 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_3..offset_3 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_4..offset_4 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_5..offset_5 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_6..offset_6 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_7..offset_7 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_8..offset_8 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_9..offset_9 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_10..offset_10 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_11..offset_11 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_12..offset_12 + NODE_SIZE) }
+               ];
 
-        // base parents
-        hash!(next_base!(parents, 1), hasher, data);
-        hash!(next_base!(parents, 2), hasher, data);
-        hash!(next_base!(parents, 3), hasher, data);
-        hash!(next_base!(parents, 4), hasher, data);
+        let hash = blake2s_filecoin::hash_nodes_14(&all_parents);
 
-        // exp parents
-        hash!(next_exp!(parents, 5), hasher, data);
-        hash!(next_exp!(parents, 6), hasher, data);
-        hash!(next_exp!(parents, 7), hasher, data);
-        hash!(next_exp!(parents, 8), hasher, data);
-        hash!(next_exp!(parents, 9), hasher, data);
-        hash!(next_exp!(parents, 10), hasher, data);
-        hash!(next_exp!(parents, 11), hasher, data);
-        hash!(next_exp!(parents, 12), hasher, data);
+        (bytes_into_fr_repr_safe(hash.as_ref()), 448)
     }
-
-    let hash = hasher.finalize();
-    bytes_into_fr_repr_safe(hash.as_ref()).into()
+    else {
+        let count = hasher.count();
+        let hash = hasher.finalize();
+        (bytes_into_fr_repr_safe(hash.as_ref()), count)
+    }
 }
 
 fn create_key_rev<H: Hasher>(
     parents: &ParentsIterRev,
     node: usize,
     data: &[u8],
-    mut hasher: State,
-) -> H::Domain {
+    hasher: State,
+    replica_id: &[u8],
+) -> (FrRepr, u64) {
     // compile time fixed at 5 + 8 = 13 parents
-
-    // The hash is about the parents, hence skip if a node doesn't have any parents
+    // The hash is about the parents, skip if a node doesn't have any parents
     let p0 = next_base_rev!(parents, 0);
     if node != p0 {
-        // hash first parent
-        let offset = data_at_node_offset(p0);
-        hasher.update(&unsafe { data.get_unchecked(offset..offset + NODE_SIZE) });
+        let offset    = data_at_node_offset(p0);
+        let offset_1  = data_at_node_offset(next_base_rev!(parents, 1));
+        let offset_2  = data_at_node_offset(next_base_rev!(parents, 2));
+        let offset_3  = data_at_node_offset(next_base_rev!(parents, 3));
+        let offset_4  = data_at_node_offset(next_base_rev!(parents, 4));
+        let offset_5  = data_at_node_offset(next_exp!(parents, 5));
+        let offset_6  = data_at_node_offset(next_exp!(parents, 6));
+        let offset_7  = data_at_node_offset(next_exp!(parents, 7));
+        let offset_8  = data_at_node_offset(next_exp!(parents, 8));
+        let offset_9  = data_at_node_offset(next_exp!(parents, 9));
+        let offset_10 = data_at_node_offset(next_exp!(parents, 10));
+        let offset_11 = data_at_node_offset(next_exp!(parents, 11));
+        let offset_12 = data_at_node_offset(next_exp!(parents, 12));
+        let all_parents: [&[u8]; 14] = [
+               replica_id,
+               &unsafe { data.get_unchecked(offset..offset + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_1..offset_1 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_2..offset_2 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_3..offset_3 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_4..offset_4 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_5..offset_5 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_6..offset_6 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_7..offset_7 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_8..offset_8 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_9..offset_9 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_10..offset_10 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_11..offset_11 + NODE_SIZE) },
+               &unsafe { data.get_unchecked(offset_12..offset_12 + NODE_SIZE) }
+               ];
 
-        // base parents
-        hash!(next_base_rev!(parents, 1), hasher, data);
-        hash!(next_base_rev!(parents, 2), hasher, data);
-        hash!(next_base_rev!(parents, 3), hasher, data);
-        hash!(next_base_rev!(parents, 4), hasher, data);
-
-        // exp parents
-        hash!(next_exp!(parents, 5), hasher, data);
-        hash!(next_exp!(parents, 6), hasher, data);
-        hash!(next_exp!(parents, 7), hasher, data);
-        hash!(next_exp!(parents, 8), hasher, data);
-        hash!(next_exp!(parents, 9), hasher, data);
-        hash!(next_exp!(parents, 10), hasher, data);
-        hash!(next_exp!(parents, 11), hasher, data);
-        hash!(next_exp!(parents, 12), hasher, data);
+        let hash = blake2s_filecoin::hash_nodes_14(&all_parents);
+        (bytes_into_fr_repr_safe(hash.as_ref()), 448)
     }
-
-    let hash = hasher.finalize();
-    bytes_into_fr_repr_safe(hash.as_ref()).into()
+    else {
+        let count = hasher.count();
+        let hash = hasher.finalize();
+        (bytes_into_fr_repr_safe(hash.as_ref()), count)
+    }
 }
 
 #[inline(always)]

@@ -1,2 +1,4 @@
 /target
-**/*.rs.bk
+Cargo.lock
+g_100mb.json
+*.profile

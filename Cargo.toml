@@ -20,4 +20,4 @@ serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"]}
 gperftools = "0.2"
 tsc = "0.1.0"
-blake2s_filecoin = {path = "../blake2s_filecoin"}
+blake2s_filecoin = {git = "https://github.com/sean-sn/blake2s_filecoin"}

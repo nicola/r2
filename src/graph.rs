@@ -1,29 +1,32 @@
-use rand::{ChaChaRng, Rng, SeedableRng};
-use serde::{Deserialize, Serialize};
-use serde_json;
 use std::cmp;
 use std::fs::metadata;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Write;
+
+use blake2s_simd::{Params as Blake2s, State};
+use rand::{ChaChaRng, Rng, SeedableRng};
+use serde::{Deserialize, Serialize};
+use serde_json;
 use storage_proofs::crypto::feistel;
+use storage_proofs::fr32::bytes_into_fr_repr_safe;
+use storage_proofs::hasher::{Domain, Hasher};
+use storage_proofs::util::data_at_node_offset;
+
+use crate::{BASE_PARENTS, EXP_PARENTS, NODES, NODE_SIZE, PARENT_SIZE, SEED};
 
 /// A Graph holds settings and cache
 #[derive(Serialize, Deserialize)]
 pub struct Graph {
-    pub nodes: usize,
-    base_degree: usize,
-    expansion_degree: usize,
-    seed: [u32; 7],
-    pub bas: Vec<Vec<usize>>,
-    pub exp: Vec<Vec<usize>>,
-    pub exp_reversed: Vec<Vec<usize>>,
+    pub bas: Vec<[usize; BASE_PARENTS]>,
+    pub exp: Vec<[usize; EXP_PARENTS]>,
+    pub exp_reversed: Vec<[usize; EXP_PARENTS]>,
 }
 
 /// Given a node and a graph, find the parents of a node DRG graph
-fn bucketsample_parents(g: &Graph, node: usize) -> Vec<usize> {
-    let m = g.base_degree;
-    let mut parents = [0; 5];
+fn bucketsample_parents(node: usize) -> [usize; BASE_PARENTS] {
+    let m = BASE_PARENTS;
+    let mut parents = [0; BASE_PARENTS];
 
     match node {
         // Special case for the first node, it self references.
@@ -38,7 +41,7 @@ fn bucketsample_parents(g: &Graph, node: usize) -> Vec<usize> {
         _ => {
             // seed = self.seed | node
             let mut seed = [0u32; 8];
-            seed[0..7].copy_from_slice(&g.seed);
+            seed[0..7].copy_from_slice(&SEED[..]);
             seed[7] = node as u32;
             let mut rng = ChaChaRng::from_seed(&seed);
 
@@ -67,73 +70,67 @@ fn bucketsample_parents(g: &Graph, node: usize) -> Vec<usize> {
         }
     }
 
-    parents.to_vec()
+    parents
 }
 
 /// Given a node and a graph (and feistel settings) generate the expander
 /// graph parents on a node in a layer in ZigZag.
 fn expander_parents(
-    g: &Graph,
     node: usize,
     feistel_precomputed: feistel::FeistelPrecomputed,
-) -> Vec<usize> {
+) -> [usize; EXP_PARENTS] {
     // Set the Feistel permutation keys
     let feistel_keys = &[1, 2, 3, 4];
 
+    let mut parents = [0; EXP_PARENTS];
     // The expander graph parents are calculated by computing 3 rounds of the
     // feistel permutation on the current node
-    let parents: Vec<usize> = (0..g.expansion_degree)
-        .filter_map(|i| {
-            let parent = feistel::permute(
-                (g.nodes * g.expansion_degree) as feistel::Index,
-                (node * g.expansion_degree + i) as feistel::Index,
-                feistel_keys,
-                feistel_precomputed,
-            ) as usize
-                / g.expansion_degree;
-            if parent < node {
-                Some(parent)
-            } else {
-                None
-            }
-        })
-        .collect();
+    for (i, p) in (0..EXP_PARENTS).filter_map(|i| {
+        let parent = feistel::permute(
+            (NODES * EXP_PARENTS) as feistel::Index,
+            (node * EXP_PARENTS + i) as feistel::Index,
+            feistel_keys,
+            feistel_precomputed,
+        ) as usize
+            / EXP_PARENTS;
+        if parent < node {
+            Some((i, parent))
+        } else {
+            None
+        }
+    }) {
+        parents[i] = p;
+    }
+
     parents
 }
 
 impl Graph {
     /// Create a graph
-    pub fn new(nodes: usize, base_degree: usize, expansion_degree: usize, seed: [u32; 7]) -> Self {
+    pub fn new() -> Self {
         Graph {
-            nodes,
-            base_degree,
-            expansion_degree,
-            seed,
-            exp: vec![vec![]; nodes],
-            bas: vec![vec![]; nodes],
-            exp_reversed: vec![vec![]; nodes],
+            exp: vec![[0; EXP_PARENTS]; NODES],
+            bas: vec![[0; BASE_PARENTS]; NODES],
+            exp_reversed: vec![[0; EXP_PARENTS]; NODES],
         }
     }
     // Create a graph, generate its parents and cache them.
     // Parents are cached in a JSON file
-    pub fn new_cached(
-        nodes: usize,
-        base_degree: usize,
-        expander_parents: usize,
-        seed: [u32; 7],
-    ) -> Graph {
-        if let Err(_) = metadata("g.json") {
-            println!("Parents not cached, creating them");
-            let mut gg = Graph::new(nodes, base_degree, expander_parents, seed);
+    pub fn new_cached() -> Graph {
+        let cache = format!("g_{}mb.json", NODES * 32 / 1024 / 1024);
+        if let Err(_) = metadata(&cache) {
+            println!("Parents not cached, creating {}", &cache);
+            let mut gg = Graph::new();
             gg.gen_parents_cache();
-            let mut f = File::create("g.json").expect("Unable to create file");
+            let mut f = File::create(&cache).expect("Unable to create file");
             let j = serde_json::to_string(&gg).expect("unable to create json");
             write!(f, "{}\n", j).expect("Unable to write file");
 
             gg
         } else {
             println!("Parents are cached, loading them");
-            let mut f = File::open("g.json").expect("Unable to open the file");
+            let cache = format!("g_{}mb.json", NODES * 32 / 1024 / 1024);
+            let mut f = File::open(&cache).expect("Unable to open the file");
             let mut json = String::new();
             f.read_to_string(&mut json)
                 .expect("Unable to read the file");
@@ -142,71 +139,58 @@ impl Graph {
         }
     }
 
-    pub fn parents_odd(&self, node: usize, parents: &mut [usize]) {
-        // DRG parents
-        // On an odd layer, invert the graph:
-        // - given a node n, find the parents of nodes - n - 1
-        // - for each parent, return nodes - parent - 1
-        let n = self.nodes - node - 1;
-        let base_parents = &self.bas[n];
-        let base_parents_len = base_parents.len();
-        // Copying base parents
-        for (i, v) in base_parents.iter().enumerate() {
-            parents[i] = self.nodes - v - 1;
-        }
-
-        // Expander parents
-        // On an odd layer, reverse the edges:
-        // A->B is now B->A
-        let exp_parents = &self.exp_reversed[node];
-        let exp_parents_len = exp_parents.len();
-        parents[base_parents_len..base_parents_len + exp_parents_len].copy_from_slice(&exp_parents);
-
-        // Adding needed padding only
-        for i in base_parents_len + exp_parents_len..self.degree() {
-            parents[i] = 0;
-        }
-    }
-
-    /// Load the parents of a node from cache
-    pub fn parents_even(&self, node: usize, parents: &mut [usize]) {
-        // DRG Parents
-        let base_parents = &self.bas[node];
-        let base_parents_len = base_parents.len();
-        // Copying base parents
-        parents[0..base_parents.len()].copy_from_slice(base_parents);
-
-        // Expander parents
-        let exp_parents = &self.exp[node];
-        let exp_parents_len = exp_parents.len();
-        parents[base_parents_len..base_parents_len + exp_parents_len].copy_from_slice(exp_parents);
-
-        // Adding needed padding only
-        for i in base_parents_len + exp_parents_len..self.degree() {
-            parents[i] = 0;
-        }
-    }
-
     pub fn gen_parents_cache(&mut self) {
-        let fp = feistel::precompute((self.expansion_degree * self.nodes) as feistel::Index);
+        let fp = feistel::precompute((EXP_PARENTS * NODES) as feistel::Index);
 
         // Cache only forward DRG and Expander parents
-        for node in 0..self.nodes {
-            self.bas[node] = bucketsample_parents(&self, node);
-            self.exp[node] = expander_parents(&self, node, fp);
+        for node in 0..NODES {
+            self.bas[node] = bucketsample_parents(node);
+            self.exp[node] = expander_parents(node, fp);
         }
 
         // Cache reverse edges for exp
         for (n1, v) in self.exp.iter().enumerate() {
+            let mut i = 0;
             for n2 in v {
-                self.exp_reversed[*n2].push(n1);
+                self.exp_reversed[*n2][i] = n1;
+                i += 1;
             }
         }
 
         // TODO: sort parents
     }
+}
 
-    pub fn degree(&self) -> usize {
-        self.base_degree + self.expansion_degree
+pub struct ParentsIter<'a> {
+    pub base_parents: &'a [usize],
+    pub exp_parents: &'a [usize],
+}
+
+pub struct ParentsIterRev<'a> {
+    pub base_parents: &'a [usize],
+    pub exp_parents: &'a [usize],
+}
+
+impl<'a> ParentsIterRev<'a> {
+    pub fn new(graph: &'a Graph, node: usize) -> Self {
+        let base_parents = &graph.bas[NODES - node - 1];
+        let exp_parents = &graph.exp_reversed[node];
+
+        ParentsIterRev {
+            base_parents,
+            exp_parents,
+        }
+    }
+}
+
+impl<'a> ParentsIter<'a> {
+    pub fn new(graph: &'a Graph, node: usize) -> Self {
+        let base_parents = &graph.bas[node];
+        let exp_parents = &graph.exp[node];
+
+        ParentsIter {
+            base_parents,
+            exp_parents,
+        }
     }
 }

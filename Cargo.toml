@@ -10,7 +10,7 @@ edition = "2018"
 memmap = "0.7"
 chrono = "0.4"
 tempfile = "3"
-storage-proofs = "0.3.0"
+storage-proofs = {git = "https://github.com/filecoin-project/rust-fil-proofs/"}
 blake2s_simd = "0.5"
 paired = { version = "0.15", features = ["serde"] }
 ff = "0.4.0"

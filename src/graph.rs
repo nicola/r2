@@ -142,34 +142,9 @@ impl Graph {
         }
     }
 
-    pub fn parents_odd(&self, node: usize, parents: &mut [usize]) {
-        // DRG parents
-        // On an odd layer, invert the graph:
-        // - given a node n, find the parents of nodes - n - 1
-        // - for each parent, return nodes - parent - 1
-        let n = self.nodes - node - 1;
-        let base_parents = &self.bas[n];
-        let base_parents_len = base_parents.len();
-        // Copying base parents
-        for (i, v) in base_parents.iter().enumerate() {
-            parents[i] = self.nodes - v - 1;
-        }
-
-        // Expander parents
-        // On an odd layer, reverse the edges:
-        // A->B is now B->A
-        let exp_parents = &self.exp_reversed[node];
-        let exp_parents_len = exp_parents.len();
-        parents[base_parents_len..base_parents_len + exp_parents_len].copy_from_slice(&exp_parents);
-
-        // Adding needed padding only
-        for i in base_parents_len + exp_parents_len..self.degree() {
-            parents[i] = 0;
-        }
-    }
 
     /// Load the parents of a node from cache
-    pub fn parents_even(&self, node: usize, parents: &mut [usize]) {
+    pub fn parents(&self, node: usize, parents: &mut [usize]) {
         // DRG Parents
         let base_parents = &self.bas[node];
         let base_parents_len = base_parents.len();

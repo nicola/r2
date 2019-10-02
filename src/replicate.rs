@@ -1,15 +1,14 @@
+use blake2s_simd::Params as Blake2s;
 use ff::Field;
 use paired::bls12_381::Fr;
 use storage_proofs::error::Result;
 use storage_proofs::hasher::{Domain, Hasher};
-use storage_proofs::util::data_at_node_offset;
-use storage_proofs::vde::create_key;
 
 use crate::graph;
 use crate::LAYERS;
 use crate::NODE_SIZE;
 
-/// Generates a ZigZag replicated sector
+/// Generates an SDR replicated sector
 pub fn r2<'a, H>(replica_id: &'a H::Domain, data: &'a mut [u8], g: &'a graph::Graph)
 where
     H: Hasher,
@@ -40,37 +39,28 @@ where
     // instead of allocating a new vector memory every time, re-use this one
     let mut parents = vec![0; graph.degree()];
 
-    // Optimization
-    // instead of checking the parity of the layer per node,
-    // check that per layer.
-    let get_parents = {
-        if layer % 2 == 0 {
-            graph::Graph::parents_even
-        } else {
-            graph::Graph::parents_odd
-        }
-    };
-
     for node in 0..graph.nodes {
         // Get the `parents`
-        get_parents(&graph, node, &mut parents);
+        graph::Graph::parents(&graph, node, &mut parents);
 
-        // Compute `key` from `parents`
-        let key = create_key::<H>(replica_id, node, &parents, data)?;
-
-        // Get the `unencoded` node
-        let start = data_at_node_offset(node);
-        let end = start + NODE_SIZE;
-        let node_data = H::Domain::try_from_bytes(&data[start..end])?;
-        let mut node_fr: Fr = node_data.into();
-
-        // Compute the `encoded` node by adding the `key` to it
-        node_fr.add_assign(&key.into());
-        let encoded: H::Domain = node_fr.into();
+        // Compute `label` from `parents`
+        let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
+        hasher.update(replica_id.as_ref());
+        for parent in parents.iter() {
+            let offset = data_at_node_offset(*parent);
+            hasher.update(&data[offset..offset + NODE_SIZE]);
+        }
+        let label = hasher.finalize();
 
         // Store the `encoded` data
-        encoded.write_bytes(&mut data[start..end])?;
+        let start = data_at_node_offset(node);
+        let end = start + NODE_SIZE;
+        data[start..end].copy_from_slice(label.as_ref());
     }
 
     Ok(())
+}
+
+fn data_at_node_offset(v: usize) -> usize {
+    v * NODE_SIZE
 }

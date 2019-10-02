@@ -17,7 +17,6 @@ pub struct Graph {
     seed: [u32; 7],
     pub bas: Vec<Vec<usize>>,
     pub exp: Vec<Vec<usize>>,
-    pub exp_reversed: Vec<Vec<usize>>,
 }
 
 /// Given a node and a graph, find the parents of a node DRG graph
@@ -111,7 +110,6 @@ impl Graph {
             seed,
             exp: vec![vec![]; nodes],
             bas: vec![vec![]; nodes],
-            exp_reversed: vec![vec![]; nodes],
         }
     }
     // Create a graph, generate its parents and cache them.
@@ -142,7 +140,6 @@ impl Graph {
         }
     }
 
-
     /// Load the parents of a node from cache
     pub fn parents(&self, node: usize, parents: &mut [usize]) {
         // DRG Parents
@@ -170,15 +167,6 @@ impl Graph {
             self.bas[node] = bucketsample_parents(&self, node);
             self.exp[node] = expander_parents(&self, node, fp);
         }
-
-        // Cache reverse edges for exp
-        for (n1, v) in self.exp.iter().enumerate() {
-            for n2 in v {
-                self.exp_reversed[*n2].push(n1);
-            }
-        }
-
-        // TODO: sort parents
     }
 
     pub fn degree(&self) -> usize {

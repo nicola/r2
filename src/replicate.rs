@@ -52,7 +52,7 @@ where
         }
         let label = hasher.finalize();
 
-        // Store the `encoded` data
+        // Store the `encoded` label
         let start = data_at_node_offset(node);
         let end = start + NODE_SIZE;
         data[start..end].copy_from_slice(label.as_ref());

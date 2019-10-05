@@ -31,11 +31,12 @@ pub fn file_backed_mmap_from_zeroes(n: usize, use_tmp: bool) -> MmapMut {
             .read(true)
             .write(true)
             .create(true)
-            .open(format!("./zigzag-data-{:?}", Utc::now()))
+            // .open(format!("./zigzag-data-{:?}", Utc::now()))
+            .open("./zigzag-data")
             .unwrap()
     };
 
-    file.set_len(32 * n as u64).unwrap();
+    file.set_len((NODE_SIZE * LAYERS * n) as u64).unwrap();
 
     unsafe { MmapOptions::new().map_mut(&file).unwrap() }
 }

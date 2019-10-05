@@ -5,6 +5,7 @@ use storage_proofs::error::Result;
 use storage_proofs::hasher::{Domain, Hasher};
 
 use crate::graph;
+use crate::DATA_SIZE;
 use crate::LAYERS;
 use crate::NODE_SIZE;
 
@@ -47,13 +48,13 @@ where
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update(replica_id.as_ref());
         for parent in parents.iter() {
-            let offset = data_at_node_offset(*parent);
+            let offset = data_at_node_offset(layer, *parent);
             hasher.update(&data[offset..offset + NODE_SIZE]);
         }
         let label = hasher.finalize();
 
         // Store the `encoded` label
-        let start = data_at_node_offset(node);
+        let start = data_at_node_offset(layer, node);
         let end = start + NODE_SIZE;
         data[start..end].copy_from_slice(label.as_ref());
     }
@@ -61,6 +62,6 @@ where
     Ok(())
 }
 
-fn data_at_node_offset(v: usize) -> usize {
-    v * NODE_SIZE
+fn data_at_node_offset(layer: usize, v: usize) -> usize {
+    v * NODE_SIZE + layer * DATA_SIZE
 }

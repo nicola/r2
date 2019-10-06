@@ -7,7 +7,7 @@ use storage_proofs::hasher::{Domain, Hasher};
 use merkletree::merkle::FromIndexedParallelIterator;
 use rayon::prelude::*;
 
-use crate::{data_at_node_offset, LAYERS, NODES, NODE_SIZE};
+use crate::{data_at_node, LAYERS, NODES, NODE_SIZE};
 
 type DiskStore<E> = merkletree::merkle::DiskStore<E>;
 pub type MerkleTree<T, A> = merkle::MerkleTree<T, A, DiskStore<T>>;
@@ -26,9 +26,8 @@ where
     H: Hasher,
 {
     let leafs_f = |i| {
-        let (start, end) = data_at_node_offset(0, i);
-        let d = &data[start..end];
-        H::Domain::try_from_bytes(d).expect("failed to convert node data to domain element")
+        H::Domain::try_from_bytes(data_at_node(&data, 0, i))
+            .expect("failed to convert node data to domain element")
     };
 
     Ok(MerkleTree::from_par_iter(
@@ -42,11 +41,7 @@ where
 {
     let leaf_f = |i| {
         let rows: Vec<H::Domain> = (0..LAYERS - 1)
-            .map(|layer| {
-                let (start, end) = data_at_node_offset(layer, i);
-                let d = &data[start..end];
-                H::Domain::try_from_bytes(d)
-            })
+            .map(|layer| H::Domain::try_from_bytes(data_at_node(&data, layer, i)))
             .collect::<Result<_>>()
             .expect("failed to commit to column");
 

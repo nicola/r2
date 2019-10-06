@@ -53,11 +53,6 @@ pub fn data_at_node_offset(layer: usize, v: usize) -> (usize, usize) {
     (start, end)
 }
 
-pub fn data_at_node_mut<'a>(data: &'a mut [u8], layer: usize, v: usize) -> &'a mut [u8] {
-    let (start, end) = data_at_node_offset(layer, v);
-    &mut data[start..end]
-}
-
 pub fn data_at_node<'a>(data: &'a [u8], layer: usize, v: usize) -> &'a [u8] {
     let (start, end) = data_at_node_offset(layer, v);
     &data[start..end]

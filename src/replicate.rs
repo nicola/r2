@@ -2,10 +2,10 @@ use blake2s_simd::Params as Blake2s;
 use storage_proofs::error::Result;
 use storage_proofs::hasher::Hasher;
 
-use crate::data_at_node_offset;
 use crate::graph;
 use crate::LAYERS;
 use crate::NODE_SIZE;
+use crate::{data_at_node, data_at_node_offset};
 
 /// Generates an SDR replicated sector
 pub fn r2<'a, H>(
@@ -47,8 +47,7 @@ where
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update(replica_id.as_ref());
         for parent in parents.iter() {
-            let (start, end) = data_at_node_offset(layer, *parent);
-            hasher.update(&data[start..end]);
+            hasher.update(data_at_node(&data, layer, *parent));
         }
         let label = hasher.finalize();
 

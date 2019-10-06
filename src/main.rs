@@ -3,7 +3,7 @@ extern crate r2;
 use r2::{commit, file_backed_mmap_from_zeroes, graph, id_from_str, replicate};
 use r2::{BASE_PARENTS, EXP_PARENTS, LAYERS, NODES};
 use storage_proofs::drgraph::new_seed;
-use storage_proofs::hasher::{Blake2sHasher, Hasher, PedersenHasher};
+use storage_proofs::hasher::{Blake2sHasher, Domain, Hasher, PedersenHasher};
 
 fn main() {
     // Load the graph from memory or generate a new one
@@ -24,4 +24,6 @@ fn main() {
 
     println!("Generating CommR");
     let (comm_r, tree_rl, tree_c) = commit::commit::<PedersenHasher>(&stack);
+
+    println!("CommR is: {:02x?}", comm_r.into_bytes())
 }

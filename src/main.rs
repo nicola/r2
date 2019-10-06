@@ -22,12 +22,6 @@ fn main() {
     let mut stack = file_backed_mmap_from_zeroes(NODES, LAYERS, false, "stack");
     replicate::r2::<Blake2sHasher>(&replica_id, &original_data, &mut stack, &gg);
 
-    // Generate CommR
-    println!("Generating CommC");
-    let tree_c = commit::columns::<PedersenHasher>(&mut stack).expect("t_c failed");
-    println!("Generating CommRlast");
-    let tree_rl = commit::single::<PedersenHasher>(&mut stack, LAYERS - 1).expect("t_rl failed");
-
     println!("Generating CommR");
-    let comm_r = commit::hash2(tree_c.root(), tree_rl.root());
+    let (comm_r, tree_rl, tree_c) = commit::commit::<PedersenHasher>(&stack);
 }

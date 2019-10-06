@@ -1,11 +1,10 @@
 use merkletree::merkle;
+use merkletree::merkle::FromIndexedParallelIterator;
+use rayon::prelude::*;
 use storage_proofs::crypto::pedersen::{pedersen, pedersen_md_no_padding};
 use storage_proofs::error::Result;
 use storage_proofs::hasher::pedersen::PedersenDomain;
-use storage_proofs::hasher::{Domain, Hasher};
-
-use merkletree::merkle::FromIndexedParallelIterator;
-use rayon::prelude::*;
+use storage_proofs::hasher::{Domain, Hasher, PedersenHasher};
 
 use crate::{data_at_node, LAYERS, NODES, NODE_SIZE};
 
@@ -13,7 +12,22 @@ type DiskStore<E> = merkletree::merkle::DiskStore<E>;
 pub type MerkleTree<T, A> = merkle::MerkleTree<T, A, DiskStore<T>>;
 pub type MerkleStore<T> = DiskStore<T>;
 
-pub fn hash2(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> PedersenDomain {
+pub fn commit<'a, H: Hasher>(
+    stack: &'a [u8],
+) -> (
+    PedersenDomain,
+    MerkleTree<H::Domain, H::Function>,
+    MerkleTree<H::Domain, H::Function>,
+) {
+    // Generate CommR
+    let tree_c = columns::<H>(&stack).expect("t_c failed");
+    let tree_rl = single::<H>(&stack, LAYERS - 1).expect("t_rl failed");
+    let comm_r = comm_r(tree_c.root(), tree_rl.root());
+
+    (comm_r, tree_rl, tree_c)
+}
+
+pub fn comm_r(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> PedersenDomain {
     let mut buffer = Vec::with_capacity(a.as_ref().len() + b.as_ref().len());
     buffer.extend_from_slice(a.as_ref());
     buffer.extend_from_slice(b.as_ref());
@@ -21,7 +35,7 @@ pub fn hash2(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> PedersenDomain {
     pedersen_md_no_padding(&buffer).into()
 }
 
-pub fn single<'a, H>(data: &'a mut [u8], layer: usize) -> Result<MerkleTree<H::Domain, H::Function>>
+pub fn single<'a, H>(data: &'a [u8], layer: usize) -> Result<MerkleTree<H::Domain, H::Function>>
 where
     H: Hasher,
 {
@@ -35,7 +49,7 @@ where
     ))
 }
 
-pub fn columns<'a, H>(data: &'a mut [u8]) -> Result<MerkleTree<H::Domain, H::Function>>
+pub fn columns<'a, H>(data: &'a [u8]) -> Result<MerkleTree<H::Domain, H::Function>>
 where
     H: Hasher,
 {

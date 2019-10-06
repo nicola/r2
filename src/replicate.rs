@@ -2,10 +2,8 @@ use blake2s_simd::Params as Blake2s;
 use storage_proofs::error::Result;
 use storage_proofs::hasher::Hasher;
 
-use crate::graph;
-use crate::LAYERS;
-use crate::NODE_SIZE;
-use crate::{data_at_node, data_at_node_offset};
+use crate::{data_at_node, data_at_node_offset, graph};
+use crate::{LAYERS, NODES, NODE_SIZE};
 
 /// Generates an SDR replicated sector
 pub fn r2<'a, H>(
@@ -22,7 +20,11 @@ pub fn r2<'a, H>(
         let replica = r::<H>(g, replica_id, l, stack);
     }
 
-    // TODO perform XOR
+    for n in 0..NODES {
+        let raw = data_at_node(&data, 0, n);
+        let stack = data_at_node(&data, 0, n);
+        // TODO perform XOR
+    }
 }
 
 /// Encoding of a single layer

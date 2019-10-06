@@ -38,7 +38,7 @@ pub fn file_backed_mmap_from_zeroes(
             .write(true)
             .create(true)
             // .open(format!("./zigzag-data-{:?}", Utc::now()))
-            .open(format!("./encoding-{:}", name))
+            .open(format!("./encoding-{:}.porep", name))
             .unwrap()
     };
 
@@ -47,8 +47,20 @@ pub fn file_backed_mmap_from_zeroes(
     unsafe { MmapOptions::new().map_mut(&file).unwrap() }
 }
 
-pub fn data_at_node_offset(layer: usize, v: usize) -> usize {
-    v * NODE_SIZE + layer * DATA_SIZE
+pub fn data_at_node_offset(layer: usize, v: usize) -> (usize, usize) {
+    let start = v * NODE_SIZE + layer * DATA_SIZE;
+    let end = start + NODE_SIZE;
+    (start, end)
+}
+
+pub fn data_at_node_mut<'a>(data: &'a mut [u8], layer: usize, v: usize) -> &'a mut [u8] {
+    let (start, end) = data_at_node_offset(layer, v);
+    &mut data[start..end]
+}
+
+pub fn data_at_node<'a>(data: &'a [u8], layer: usize, v: usize) -> &'a [u8] {
+    let (start, end) = data_at_node_offset(layer, v);
+    &data[start..end]
 }
 
 /// Compute replica id from string

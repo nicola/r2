@@ -1,6 +1,3 @@
-use crate::BASE_PARENTS;
-use crate::NODES;
-
 use rand::{ChaChaRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -10,6 +7,9 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::Write;
 use storage_proofs::crypto::feistel;
+
+use crate::BASE_PARENTS;
+use crate::NODES;
 
 /// A Graph holds settings and cache
 #[derive(Serialize, Deserialize)]

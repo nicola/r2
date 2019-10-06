@@ -7,16 +7,13 @@ use storage_proofs::hasher::{Domain, Hasher};
 use merkletree::merkle::FromIndexedParallelIterator;
 use rayon::prelude::*;
 
-use crate::data_at_node_offset;
-use crate::LAYERS;
-use crate::NODES;
-use crate::NODE_SIZE;
+use crate::{data_at_node_offset, LAYERS, NODES, NODE_SIZE};
 
 type DiskStore<E> = merkletree::merkle::DiskStore<E>;
 pub type MerkleTree<T, A> = merkle::MerkleTree<T, A, DiskStore<T>>;
 pub type MerkleStore<T> = DiskStore<T>;
 
-pub fn r(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> PedersenDomain {
+pub fn hash2(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> PedersenDomain {
     let mut buffer = Vec::with_capacity(a.as_ref().len() + b.as_ref().len());
     buffer.extend_from_slice(a.as_ref());
     buffer.extend_from_slice(b.as_ref());
@@ -29,8 +26,7 @@ where
     H: Hasher,
 {
     let leafs_f = |i| {
-        let start = data_at_node_offset(0, i);
-        let end = start + NODE_SIZE;
+        let (start, end) = data_at_node_offset(0, i);
         let d = &data[start..end];
         H::Domain::try_from_bytes(d).expect("failed to convert node data to domain element")
     };
@@ -47,8 +43,7 @@ where
     let leaf_f = |i| {
         let rows: Vec<H::Domain> = (0..LAYERS - 1)
             .map(|layer| {
-                let start = data_at_node_offset(layer, i);
-                let end = start + NODE_SIZE;
+                let (start, end) = data_at_node_offset(layer, i);
                 let d = &data[start..end];
                 H::Domain::try_from_bytes(d)
             })

@@ -1,6 +1,4 @@
 use blake2s_simd::Params as Blake2s;
-// use ff::Field;
-// use paired::bls12_381::Fr;
 use storage_proofs::error::Result;
 use storage_proofs::hasher::Hasher;
 
@@ -10,20 +8,21 @@ use crate::LAYERS;
 use crate::NODE_SIZE;
 
 /// Generates an SDR replicated sector
-pub fn r2<'a, H>(replica_id: &'a H::Domain, data: &'a mut [u8], g: &'a graph::Graph)
-where
+pub fn r2<'a, H>(
+    replica_id: &'a H::Domain,
+    data: &'a [u8],
+    stack: &'a mut [u8],
+    g: &'a graph::Graph,
+) where
     H: Hasher,
 {
     // Generate a replica at each layer
     for l in 0..LAYERS {
         println!("Replica {} starting", l);
-        let replica = r::<H>(g, replica_id, l, data);
-        println!("Replica {} done", l);
-
-        if let Ok(_) = replica {
-            println!("replica is correct!");
-        }
+        let replica = r::<H>(g, replica_id, l, stack);
     }
+
+    // TODO perform XOR
 }
 
 /// Encoding of a single layer
@@ -48,14 +47,13 @@ where
         let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
         hasher.update(replica_id.as_ref());
         for parent in parents.iter() {
-            let offset = data_at_node_offset(layer, *parent);
-            hasher.update(&data[offset..offset + NODE_SIZE]);
+            let (start, end) = data_at_node_offset(layer, *parent);
+            hasher.update(&data[start..end]);
         }
         let label = hasher.finalize();
 
         // Store the `encoded` label
-        let start = data_at_node_offset(layer, node);
-        let end = start + NODE_SIZE;
+        let (start, end) = data_at_node_offset(layer, node);
         data[start..end].copy_from_slice(label.as_ref());
     }
 

@@ -4,6 +4,7 @@ use paired::bls12_381::Fr;
 use storage_proofs::error::Result;
 use storage_proofs::hasher::{Domain, Hasher};
 
+use crate::data_at_node_offset;
 use crate::graph;
 use crate::DATA_SIZE;
 use crate::LAYERS;
@@ -60,8 +61,4 @@ where
     }
 
     Ok(())
-}
-
-fn data_at_node_offset(layer: usize, v: usize) -> usize {
-    v * NODE_SIZE + layer * DATA_SIZE
 }

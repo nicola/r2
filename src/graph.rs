@@ -1,4 +1,6 @@
+use crate::BASE_PARENTS;
 use crate::NODES;
+
 use rand::{ChaChaRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -23,7 +25,7 @@ pub struct Graph {
 /// Given a node and a graph, find the parents of a node DRG graph
 fn bucketsample_parents(g: &Graph, node: usize) -> Vec<usize> {
     let m = g.base_degree;
-    let mut parents = [0; 5];
+    let mut parents = [0; BASE_PARENTS];
 
     match node {
         // Special case for the first node, it self references.

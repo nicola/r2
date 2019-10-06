@@ -4,6 +4,7 @@ use std::fs::{File, OpenOptions};
 use storage_proofs::hasher::Domain;
 use tempfile;
 
+pub mod commit;
 pub mod graph;
 pub mod replicate;
 
@@ -16,7 +17,7 @@ pub const LAYERS: usize = 10;
 /// Number of nodes in each layer DRG graph
 pub const NODES: usize = DATA_SIZE / NODE_SIZE;
 /// In-degree of the DRG graph
-pub const BASE_PARENTS: usize = 5;
+pub const BASE_PARENTS: usize = 6;
 /// Degree of the Expander graph
 pub const EXP_PARENTS: usize = 8;
 /// Number of parents for each node in the graph
@@ -39,6 +40,10 @@ pub fn file_backed_mmap_from_zeroes(n: usize, use_tmp: bool) -> MmapMut {
     file.set_len((NODE_SIZE * LAYERS * n) as u64).unwrap();
 
     unsafe { MmapOptions::new().map_mut(&file).unwrap() }
+}
+
+pub fn data_at_node_offset(layer: usize, v: usize) -> usize {
+    v * NODE_SIZE + layer * DATA_SIZE
 }
 
 /// Compute replica id from string

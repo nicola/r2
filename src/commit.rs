@@ -35,26 +35,22 @@ pub fn columns<'a, H>(data: &'a mut [u8]) -> Result<MerkleTree<H::Domain, H::Fun
 where
     H: Hasher,
 {
-    let leafs_f = |i| hash_single_column::<H>(&data, i).expect("failed to hash column");
+    let leaf_f = |i| {
+        let rows: Vec<H::Domain> = (0..LAYERS - 1)
+            .map(|layer| {
+                let start = data_at_node_offset(layer, i);
+                let end = start + NODE_SIZE;
+                let d = &data[start..end];
+                H::Domain::try_from_bytes(d)
+            })
+            .collect::<Result<_>>()
+            .expect("failed to commit to column");
+
+        let buffer: Vec<u8> = rows.iter().flat_map(|row| row.as_ref()).copied().collect();
+        pedersen_md_no_padding(&buffer).into()
+    };
 
     Ok(MerkleTree::from_par_iter(
-        (0..NODES).into_par_iter().map(leafs_f),
+        (0..NODES).into_par_iter().map(leaf_f),
     ))
-}
-
-pub fn hash_single_column<'a, H>(data: &'a [u8], index: usize) -> Result<H::Domain>
-where
-    H: Hasher,
-{
-    let rows: Vec<H::Domain> = (0..LAYERS - 1)
-        .map(|layer| {
-            let start = data_at_node_offset(layer, index);
-            let end = start + NODE_SIZE;
-            let d = &data[start..end];
-            H::Domain::try_from_bytes(d)
-        })
-        .collect::<Result<_>>()?;
-
-    let buffer: Vec<u8> = rows.iter().flat_map(|row| row.as_ref()).copied().collect();
-    Ok(pedersen_md_no_padding(&buffer).into())
 }

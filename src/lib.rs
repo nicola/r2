@@ -1,4 +1,4 @@
-use chrono::Utc;
+// use chrono::Utc;
 use memmap::{MmapMut, MmapOptions};
 use std::fs::{File, OpenOptions};
 use storage_proofs::hasher::Domain;
@@ -24,7 +24,12 @@ pub const EXP_PARENTS: usize = 8;
 pub const PARENT_SIZE: usize = BASE_PARENTS + EXP_PARENTS;
 
 /// Generate a tmp file full of zeros
-pub fn file_backed_mmap_from_zeroes(n: usize, use_tmp: bool) -> MmapMut {
+pub fn file_backed_mmap_from_zeroes(
+    n: usize,
+    layers: usize,
+    use_tmp: bool,
+    name: &'static str,
+) -> MmapMut {
     let file: File = if use_tmp {
         tempfile::tempfile().unwrap()
     } else {
@@ -33,11 +38,11 @@ pub fn file_backed_mmap_from_zeroes(n: usize, use_tmp: bool) -> MmapMut {
             .write(true)
             .create(true)
             // .open(format!("./zigzag-data-{:?}", Utc::now()))
-            .open("./zigzag-data")
+            .open(format!("./encoding-{:}", name))
             .unwrap()
     };
 
-    file.set_len((NODE_SIZE * LAYERS * n) as u64).unwrap();
+    file.set_len((NODE_SIZE * layers * n) as u64).unwrap();
 
     unsafe { MmapOptions::new().map_mut(&file).unwrap() }
 }

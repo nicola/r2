@@ -1,12 +1,11 @@
 use blake2s_simd::Params as Blake2s;
-use ff::Field;
-use paired::bls12_381::Fr;
+// use ff::Field;
+// use paired::bls12_381::Fr;
 use storage_proofs::error::Result;
-use storage_proofs::hasher::{Domain, Hasher};
+use storage_proofs::hasher::Hasher;
 
 use crate::data_at_node_offset;
 use crate::graph;
-use crate::DATA_SIZE;
 use crate::LAYERS;
 use crate::NODE_SIZE;
 

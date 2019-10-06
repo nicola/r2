@@ -1,4 +1,5 @@
 use merkletree::merkle;
+use storage_proofs::crypto::pedersen::pedersen_md_no_padding;
 use storage_proofs::error::Result;
 use storage_proofs::hasher::{Domain, Hasher};
 
@@ -6,6 +7,7 @@ use merkletree::merkle::FromIndexedParallelIterator;
 use rayon::prelude::*;
 
 use crate::data_at_node_offset;
+use crate::LAYERS;
 use crate::NODES;
 use crate::NODE_SIZE;
 
@@ -13,10 +15,7 @@ type DiskStore<E> = merkletree::merkle::DiskStore<E>;
 pub type MerkleTree<T, A> = merkle::MerkleTree<T, A, DiskStore<T>>;
 pub type MerkleStore<T> = DiskStore<T>;
 
-pub fn commit<'a, H>(
-    data: &'a mut [u8],
-    columns: usize,
-) -> Result<MerkleTree<H::Domain, H::Function>>
+pub fn single<'a, H>(data: &'a mut [u8], layer: usize) -> Result<MerkleTree<H::Domain, H::Function>>
 where
     H: Hasher,
 {
@@ -30,4 +29,32 @@ where
     Ok(MerkleTree::from_par_iter(
         (0..NODES).into_par_iter().map(leafs_f),
     ))
+}
+
+pub fn columns<'a, H>(data: &'a mut [u8]) -> Result<MerkleTree<H::Domain, H::Function>>
+where
+    H: Hasher,
+{
+    let leafs_f = |i| hash_single_column::<H>(&data, i).expect("failed to hash column");
+
+    Ok(MerkleTree::from_par_iter(
+        (0..NODES).into_par_iter().map(leafs_f),
+    ))
+}
+
+pub fn hash_single_column<'a, H>(data: &'a [u8], index: usize) -> Result<H::Domain>
+where
+    H: Hasher,
+{
+    let rows: Vec<H::Domain> = (0..LAYERS - 1)
+        .map(|layer| {
+            let start = data_at_node_offset(layer, index);
+            let end = start + NODE_SIZE;
+            let d = &data[start..end];
+            H::Domain::try_from_bytes(d)
+        })
+        .collect::<Result<_>>()?;
+
+    let buffer: Vec<u8> = rows.iter().flat_map(|row| row.as_ref()).copied().collect();
+    Ok(pedersen_md_no_padding(&buffer).into())
 }

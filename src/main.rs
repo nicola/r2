@@ -27,7 +27,10 @@ fn main() {
 
     // Generate CommR
     println!("Generating CommC");
-    let tree_c = commit::columns::<PedersenHasher>(&mut replica);
+    let tree_c = commit::columns::<PedersenHasher>(&mut replica).expect("t_c failed");
     println!("Generating CommRlast");
-    let tree_r_last = commit::single::<PedersenHasher>(&mut replica, LAYERS - 1);
+    let tree_rl = commit::single::<PedersenHasher>(&mut replica, LAYERS - 1).expect("t_rl failed");
+
+    println!("Generating CommR");
+    let comm_r = commit::r(tree_c.root(), tree_rl.root());
 }

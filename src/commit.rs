@@ -1,6 +1,7 @@
 use merkletree::merkle;
-use storage_proofs::crypto::pedersen::pedersen_md_no_padding;
+use storage_proofs::crypto::pedersen::{pedersen, pedersen_md_no_padding};
 use storage_proofs::error::Result;
+use storage_proofs::hasher::pedersen::PedersenDomain;
 use storage_proofs::hasher::{Domain, Hasher};
 
 use merkletree::merkle::FromIndexedParallelIterator;
@@ -14,6 +15,14 @@ use crate::NODE_SIZE;
 type DiskStore<E> = merkletree::merkle::DiskStore<E>;
 pub type MerkleTree<T, A> = merkle::MerkleTree<T, A, DiskStore<T>>;
 pub type MerkleStore<T> = DiskStore<T>;
+
+pub fn r(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> PedersenDomain {
+    let mut buffer = Vec::with_capacity(a.as_ref().len() + b.as_ref().len());
+    buffer.extend_from_slice(a.as_ref());
+    buffer.extend_from_slice(b.as_ref());
+
+    pedersen_md_no_padding(&buffer).into()
+}
 
 pub fn single<'a, H>(data: &'a mut [u8], layer: usize) -> Result<MerkleTree<H::Domain, H::Function>>
 where

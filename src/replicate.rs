@@ -6,12 +6,8 @@ use crate::{data_at_node, data_at_node_offset, graph};
 use crate::{LAYERS, NODES, NODE_SIZE};
 
 /// Generates an SDR replicated sector
-pub fn r2<'a, H>(
-    replica_id: &'a H::Domain,
-    data: &'a [u8],
-    stack: &'a mut [u8],
-    g: &'a graph::Graph,
-) where
+pub fn r2<'a, H>(replica_id: &'a [u8], data: &'a [u8], stack: &'a mut [u8], g: &'a graph::Graph)
+where
     H: Hasher,
 {
     // Generate a replica at each layer
@@ -30,7 +26,7 @@ pub fn r2<'a, H>(
 /// Encoding of a single layer
 pub fn r<'a, H>(
     graph: &'a graph::Graph,
-    replica_id: &'a H::Domain,
+    replica_id: &'a [u8],
     layer: usize,
     data: &'a mut [u8],
 ) -> Result<()>

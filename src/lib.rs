@@ -22,6 +22,8 @@ pub const BASE_PARENTS: usize = 6;
 pub const EXP_PARENTS: usize = 8;
 /// Number of parents for each node in the graph
 pub const PARENT_SIZE: usize = BASE_PARENTS + EXP_PARENTS;
+// Size of ReplicaId
+pub const REPLICA_ID_SIZE: usize = 32;
 
 /// Generate a tmp file full of zeros
 pub fn file_backed_mmap_from_zeroes(
@@ -56,13 +58,4 @@ pub fn data_at_node_offset(layer: usize, v: usize) -> (usize, usize) {
 pub fn data_at_node<'a>(data: &'a [u8], layer: usize, v: usize) -> &'a [u8] {
     let (start, end) = data_at_node_offset(layer, v);
     &data[start..end]
-}
-
-/// Compute replica id from string
-pub fn id_from_str<T: Domain>(raw: &str) -> T {
-    let replica_id_raw = hex::decode(raw).expect("invalid hex for replica id seed");
-    let mut replica_id_bytes = vec![0u8; 32];
-    let len = ::std::cmp::min(32, replica_id_raw.len());
-    replica_id_bytes[..len].copy_from_slice(&replica_id_raw[..len]);
-    T::try_from_bytes(&replica_id_bytes).expect("invalid replica id")
 }

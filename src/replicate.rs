@@ -1,5 +1,11 @@
+use ff::Field;
+use ff::PrimeField;
+use paired::bls12_381::Fr;
+
 use blake2s_simd::Params as Blake2s;
 use storage_proofs::error::Result;
+use storage_proofs::fr32::{bytes_into_fr_repr_safe, fr_into_bytes};
+use storage_proofs::hasher::Domain;
 use storage_proofs::hasher::Hasher;
 
 use crate::{data_at_node, data_at_node_offset, graph};
@@ -16,10 +22,16 @@ where
         let replica = r::<H>(g, replica_id, l, stack);
     }
 
-    for n in 0..NODES {
-        let raw = data_at_node(&data, 0, n);
-        let stack = data_at_node(&data, 0, n);
-        // TODO perform XOR
+    for i in 0..NODES {
+        let raw_node = data_at_node(&data, 0, i);
+        let raw_fr: Fr = Fr::from_repr(bytes_into_fr_repr_safe(&raw_node)).expect("failed");
+        let mut stack_node = data_at_node(&stack, LAYERS - 1, i);
+        let mut stack_fr: Fr = Fr::from_repr(bytes_into_fr_repr_safe(&stack_node)).expect("failed");
+        stack_fr.add_assign(&raw_fr);
+
+        let encoded: H::Domain = stack_fr.into();
+        let (start, end) = data_at_node_offset(LAYERS - 1, i);
+        encoded.write_bytes(&mut stack[start..end]).expect("failed");
     }
 }
 

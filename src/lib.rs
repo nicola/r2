@@ -25,6 +25,7 @@ pub const EXP_PARENTS: usize = 8;
 pub const PARENT_SIZE: usize = BASE_PARENTS + EXP_PARENTS;
 // Size of ReplicaId
 pub const REPLICA_ID_SIZE: usize = 32;
+pub const OFFLINE_CHALLENGES: usize = 100;
 
 /// Generate a tmp file full of zeros
 pub fn file_backed_mmap_from_zeroes(

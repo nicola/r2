@@ -1,12 +1,12 @@
 use merkletree::merkle;
 use merkletree::merkle::FromIndexedParallelIterator;
 use rayon::prelude::*;
-use storage_proofs::crypto::pedersen::{pedersen, pedersen_md_no_padding};
+use storage_proofs::crypto::pedersen::pedersen_md_no_padding;
 use storage_proofs::error::Result;
 use storage_proofs::hasher::pedersen::PedersenDomain;
-use storage_proofs::hasher::{Domain, Hasher, PedersenHasher};
+use storage_proofs::hasher::{Domain, Hasher};
 
-use crate::{data_at_node, LAYERS, NODES, NODE_SIZE};
+use crate::{data_at_node, LAYERS, NODES};
 
 type DiskStore<E> = merkletree::merkle::DiskStore<E>;
 pub type MerkleTree<T, A> = merkle::MerkleTree<T, A, DiskStore<T>>;

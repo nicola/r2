@@ -1,11 +1,11 @@
 // use chrono::Utc;
 use memmap::{MmapMut, MmapOptions};
 use std::fs::{File, OpenOptions};
-use storage_proofs::hasher::Domain;
 use tempfile;
 
 pub mod commit;
 pub mod graph;
+pub mod prove;
 pub mod replicate;
 
 /// Size of the data to encode

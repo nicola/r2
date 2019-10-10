@@ -4,7 +4,7 @@ use paired::bls12_381::Fr;
 
 use blake2s_simd::Params as Blake2s;
 use storage_proofs::error::Result;
-use storage_proofs::fr32::{bytes_into_fr_repr_safe, fr_into_bytes};
+use storage_proofs::fr32::bytes_into_fr_repr_safe;
 use storage_proofs::hasher::Domain;
 use storage_proofs::hasher::Hasher;
 

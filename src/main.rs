@@ -4,7 +4,7 @@ use blake2s_simd::Params as Blake2s;
 use r2::{commit, file_backed_mmap_from_zeroes, graph, replicate};
 use r2::{BASE_PARENTS, EXP_PARENTS, LAYERS, NODES, REPLICA_ID_SIZE};
 use storage_proofs::drgraph::new_seed;
-use storage_proofs::hasher::{Blake2sHasher, Domain, Hasher, PedersenHasher};
+use storage_proofs::hasher::{Blake2sHasher, PedersenHasher};
 
 fn main() {
     // Load the graph from memory or generate a new one
@@ -34,7 +34,7 @@ fn main() {
     replicate::r2::<Blake2sHasher>(replica_id.as_ref(), &original_data, &mut stack, &gg);
 
     println!("Generating CommR");
-    let (comm_r, tree_rl, tree_c) = commit::commit::<PedersenHasher>(&stack);
+    let (comm_r, _tree_rl, _tree_c) = commit::commit::<PedersenHasher>(&stack);
 
     println!("CommR is: {:02x?}", &comm_r)
 }

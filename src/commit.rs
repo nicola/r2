@@ -40,7 +40,7 @@ where
     H: Hasher,
 {
     let leafs_f = |i| {
-        H::Domain::try_from_bytes(data_at_node(&data, 0, i))
+        H::Domain::try_from_bytes(data_at_node(&data, layer, i))
             .expect("failed to convert node data to domain element")
     };
 
@@ -54,13 +54,11 @@ where
     H: Hasher,
 {
     let leaf_f = |i| {
-        let rows: Vec<H::Domain> = (0..LAYERS - 1)
-            .map(|layer| H::Domain::try_from_bytes(data_at_node(&data, layer, i)))
-            .collect::<Result<_>>()
-            .expect("failed to commit to column");
-
-        let buffer: Vec<u8> = rows.iter().flat_map(|row| row.as_ref()).copied().collect();
-        pedersen_md_no_padding(&buffer).into()
+        let rows: Vec<u8> = (0..LAYERS - 1)
+            .flat_map(|layer| data_at_node(&data, layer, i).iter())
+            .cloned()
+            .collect::<Vec<u8>>();
+        pedersen_md_no_padding(&rows).into()
     };
 
     Ok(MerkleTree::from_par_iter(

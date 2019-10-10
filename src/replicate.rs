@@ -19,13 +19,13 @@ where
     // Generate a replica at each layer
     for l in 0..LAYERS {
         println!("Replica {} starting", l);
-        let replica = r::<H>(g, replica_id, l, stack);
+        r::<H>(g, replica_id, l, stack).expect("some layers failed replicating");
     }
 
     for i in 0..NODES {
         let raw_node = data_at_node(&data, 0, i);
         let raw_fr: Fr = Fr::from_repr(bytes_into_fr_repr_safe(&raw_node)).expect("failed");
-        let mut stack_node = data_at_node(&stack, LAYERS - 1, i);
+        let stack_node = data_at_node(&stack, LAYERS - 1, i);
         let mut stack_fr: Fr = Fr::from_repr(bytes_into_fr_repr_safe(&stack_node)).expect("failed");
         stack_fr.add_assign(&raw_fr);
 

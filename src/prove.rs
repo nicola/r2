@@ -1,9 +1,8 @@
-use crate::commit::comm_r;
 use crate::commit::MerkleTree;
 use crate::NODES;
 
-use merkletree::proof;
-use std::marker::PhantomData;
+// use std::marker::PhantomData;
+use storage_proofs::circuit::stacked;
 use storage_proofs::error::Result;
 use storage_proofs::hasher::{Domain, Hasher};
 
@@ -23,7 +22,7 @@ pub struct PrivateInputs<'a, H: 'a + Hasher> {
     // _h: PhantomData<H>,
 }
 
-pub struct OfflineProof<H: Hasher> {
+pub struct Witness<H: Hasher> {
     pub openings_d: Vec<H::Domain>,
     pub openings_c: Vec<H::Domain>,
     pub openings_rl: Vec<H::Domain>,
@@ -31,13 +30,13 @@ pub struct OfflineProof<H: Hasher> {
     pub comm_c: H::Domain,
 }
 
-pub fn offline_witness<'a, H: Hasher>(
+pub fn witness<'a, H: Hasher>(
     pub_inputs: PublicInputs<H::Domain>,
     priv_inputs: PrivateInputs<'a, H>,
-) -> OfflineProof<H> {
+) -> Witness<H> {
     let challenge = pub_inputs.challenge % NODES;
 
-    OfflineProof {
+    Witness {
         openings_d: priv_inputs.tree_d.gen_proof(challenge).lemma().to_vec(),
         openings_c: priv_inputs.tree_c.gen_proof(challenge).lemma().to_vec(),
         openings_rl: priv_inputs.tree_rl.gen_proof(challenge).lemma().to_vec(),
@@ -45,3 +44,5 @@ pub fn offline_witness<'a, H: Hasher>(
         comm_rl: priv_inputs.tree_rl.root(),
     }
 }
+
+pub fn snark<H: Hasher>(pub_inputs: PublicInputs<H::Domain>, witness: Witness<H>) {}

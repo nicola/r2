@@ -2,7 +2,7 @@ use crate::commit::MerkleTree;
 use crate::NODES;
 
 // use std::marker::PhantomData;
-use storage_proofs::circuit::stacked;
+use paired::bls12_381::Fr;
 use storage_proofs::error::Result;
 use storage_proofs::hasher::{Domain, Hasher};
 
@@ -10,8 +10,10 @@ pub type MerklePath = Vec<u8>;
 
 #[derive(Debug, Clone)]
 pub struct PublicInputs<T: Domain> {
-    pub comm_r: Option<T>,
+    pub comm_r: T,
+    pub comm_d: T,
     pub challenge: usize,
+    pub replica_id: Fr,
 }
 
 #[derive(Debug)]
@@ -44,5 +46,3 @@ pub fn witness<'a, H: Hasher>(
         comm_rl: priv_inputs.tree_rl.root(),
     }
 }
-
-pub fn snark<H: Hasher>(pub_inputs: PublicInputs<H::Domain>, witness: Witness<H>) {}

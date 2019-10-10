@@ -7,6 +7,7 @@ pub mod commit;
 pub mod graph;
 pub mod prove;
 pub mod replicate;
+pub mod snark;
 
 /// Size of the data to encode
 pub const DATA_SIZE: usize = 1 * 1024 * 1024;

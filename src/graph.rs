@@ -45,22 +45,7 @@ fn bucketsample_parents(g: &Graph, node: usize) -> Vec<usize> {
             let mut rng = ChaChaRng::from_seed(&seed);
 
             for (k, parent) in parents.iter_mut().take(m).enumerate() {
-                // iterate over m meta nodes of the ith real node
-                // simulate the edges that we would add from previous graph nodes
-                // if any edge is added from a meta node of jth real node then add edge (j,i)
-                let logi = ((node * m) as f32).log2().floor() as usize;
-                let j = rng.gen::<usize>() % logi;
-                let jj = cmp::min(node * m + k, 1 << (j + 1));
-                let back_dist = rng.gen_range(cmp::max(jj >> 1, 2), jj + 1);
-                let out = (node * m + k - back_dist) / m;
-
-                // remove self references and replace with reference to previous node
-                if out == node {
-                    *parent = node - 1;
-                } else {
-                    assert!(out <= node);
-                    *parent = out;
-                }
+                *parent = sample_parent_node(node, m, k, &mut rng);
             }
 
             // Use the degree of the curren graph (`m`), as parents.len() might be bigger
@@ -70,6 +55,37 @@ fn bucketsample_parents(g: &Graph, node: usize) -> Vec<usize> {
     }
 
     parents.to_vec()
+}
+
+/// Core of the meta-graph construction (`bucketsample_parents`) isolated for
+/// audit and test purposes: samples *one* parent of a node. Parameters:
+/// * `node`: Index of the original node we're assigning a parent to.
+/// * `m`: Target base degree for each node *without* counting direct predecessor.
+/// * `k`: Parent generation index in the `[0,m)` range.
+/// * `rng`: RNG used *twice*, for bucket selection and posterior node selection
+///           (within that bucket).
+/// Returns:
+/// * Sampled parent.
+fn sample_parent_node<R>(node: usize, m: usize, k: usize, rng: &mut R) -> usize
+where
+    R: Rng,
+{
+    // iterate over m meta nodes of the ith real node
+    // simulate the edges that we would add from previous graph nodes
+    // if any edge is added from a meta node of jth real node then add edge (j,i)
+    let logi = ((node * m) as f32).log2().floor() as usize;
+    let j = rng.gen::<usize>() % logi;
+    let jj = cmp::min(node * m + k, 1 << (j + 1));
+    let back_dist = rng.gen_range(cmp::max(jj >> 1, 2), jj + 1);
+    let out = (node * m + k - back_dist) / m;
+
+    // remove self references and replace with reference to previous node
+    if out == node {
+        node - 1
+    } else {
+        assert!(out <= node);
+        out
+    }
 }
 
 /// Given a node and a graph (and feistel settings) generate the expander

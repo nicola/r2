@@ -1,6 +1,6 @@
 extern crate r2;
 use storage_proofs::drgraph::new_seed;
-use r2::{NODES, BASE_PARENTS, EXP_PARENTS, file_backed_mmap_from_zeroes, replicate, id_from_str, graph,};
+use r2::{NODES, BASE_PARENTS, EXP_PARENTS, file_backed_mmap_from_zeroes, replicate, graph,};
 use storage_proofs::hasher::{Blake2sHasher, Hasher};
 
 fn main() {

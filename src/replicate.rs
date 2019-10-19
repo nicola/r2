@@ -49,7 +49,7 @@ where
     // instead of allocating a new vector memory every time, re-use this one
     let mut parents = vec![0; graph.degree()];
 
-    for node in 0..graph.nodes {
+    for node in 0..NODES {
         // Get the `parents`
         graph::Graph::parents(&graph, node, &mut parents);
 

@@ -8,8 +8,7 @@ use std::io::prelude::*;
 use std::io::Write;
 use storage_proofs::crypto::feistel;
 
-use crate::BASE_PARENTS;
-use crate::NODES;
+use crate::{BASE_PARENTS, NODES, PARENT_SIZE};
 
 /// A Graph holds settings and cache
 #[derive(Serialize, Deserialize)]
@@ -144,21 +143,29 @@ impl Graph {
         }
     }
 
-    /// Load the parents of a node from cache
-    pub fn parents(&self, node: usize, parents: &mut [usize]) {
+    pub fn parents_drg(&self, node: usize, parents: &mut [usize]) {
         // DRG Parents
         let base_parents = &self.bas[node];
         let base_parents_len = base_parents.len();
         // Copying base parents
         parents[0..base_parents.len()].copy_from_slice(base_parents);
 
+        for i in base_parents_len..BASE_PARENTS {
+            parents[i] = 0;
+        }
+    }
+
+    /// Load the parents of a node from cache
+    pub fn parents(&self, node: usize, parents: &mut [usize]) {
+        self.parents_drg(node, parents);
+
         // Expander parents
         let exp_parents = &self.exp[node];
         let exp_parents_len = exp_parents.len();
-        parents[base_parents_len..base_parents_len + exp_parents_len].copy_from_slice(exp_parents);
+        parents[BASE_PARENTS..BASE_PARENTS + exp_parents_len].copy_from_slice(exp_parents);
 
         // Adding needed padding only
-        for i in base_parents_len + exp_parents_len..self.degree() {
+        for i in BASE_PARENTS + exp_parents_len..PARENT_SIZE {
             parents[i] = 0;
         }
     }

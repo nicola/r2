@@ -53,9 +53,16 @@ where
     let mut base_hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
     base_hasher.update(replica_id.as_ref());
 
+    // On layer 0, only use DRG parents
+    let get_parents = if layer == 0 {
+        graph::Graph::parents_drg
+    } else {
+        graph::Graph::parents
+    };
+
     for node in 0..NODES {
         // Get the `parents`
-        graph::Graph::parents(&graph, node, &mut parents);
+        get_parents(&graph, node, &mut parents);
 
         // Compute `label` from `parents`
         let mut hasher = base_hasher.clone();

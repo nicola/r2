@@ -49,13 +49,20 @@ where
     // instead of allocating a new vector memory every time, re-use this one
     let mut parents = vec![0; graph.degree()];
 
+    // Precompute first part of the hash used to hash the parents
+    let mut base_hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
+    base_hasher.update(replica_id.as_ref());
+
     for node in 0..NODES {
         // Get the `parents`
         graph::Graph::parents(&graph, node, &mut parents);
 
         // Compute `label` from `parents`
-        let mut hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
-        hasher.update(replica_id.as_ref());
+        let mut hasher = base_hasher.clone();
+        // prefix it with node id
+        let node_arr = (node as u64).to_le_bytes();
+        hasher.update(&node_arr);
+
         for parent in parents.iter() {
             hasher.update(data_at_node(&data, layer, *parent));
         }

@@ -8,7 +8,7 @@ use storage_proofs::hasher::{Domain, Hasher};
 
 use crate::{data_at_node, LAYERS, NODES};
 
-type DiskStore<E> = merkletree::merkle::DiskStore<E>;
+type DiskStore<E> = merkletree::store::DiskStore<E>;
 pub type MerkleTree<T, A> = merkle::MerkleTree<T, A, DiskStore<T>>;
 pub type MerkleStore<T> = DiskStore<T>;
 

@@ -45,4 +45,4 @@ pub fn witness<'a, H: Hasher>(
     }
 }
 
-pub fn snark<H: Hasher>(pub_inputs: PublicInputs<H::Domain>, witness: Witness<H>) {}
+pub fn snark<H: Hasher>(_pub_inputs: PublicInputs<H::Domain>, _witness: Witness<H>) {}

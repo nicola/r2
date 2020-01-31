@@ -17,7 +17,7 @@ pub struct Graph {
     pub nodes: usize,
     base_degree: usize,
     expansion_degree: usize,
-    seed: [u32; 7],
+    seed: [u8; 28],
     pub bas: Vec<Vec<usize>>,
     pub exp: Vec<Vec<usize>>,
 }
@@ -39,10 +39,10 @@ fn bucketsample_parents(g: &Graph, node: usize) -> Vec<usize> {
         }
         _ => {
             // seed = self.seed | node
-            let mut seed = [0u32; 8];
-            seed[0..7].copy_from_slice(&g.seed);
-            seed[7] = node as u32;
-            let mut rng = ChaChaRng::from_seed(&seed);
+            let mut seed = [0u8; 32];
+            seed[0..28].copy_from_slice(&g.seed);
+            seed[28..].copy_from_slice(&(node as u32).to_le_bytes());
+            let mut rng = ChaChaRng::from_seed(seed);
 
             for (k, parent) in parents.iter_mut().take(m).enumerate() {
                 // iterate over m meta nodes of the ith real node
@@ -105,7 +105,7 @@ fn expander_parents(
 
 impl Graph {
     /// Create a graph
-    pub fn new(nodes: usize, base_degree: usize, expansion_degree: usize, seed: [u32; 7]) -> Self {
+    pub fn new(nodes: usize, base_degree: usize, expansion_degree: usize, seed: [u8; 28]) -> Self {
         Graph {
             nodes,
             base_degree,
@@ -121,7 +121,7 @@ impl Graph {
         nodes: usize,
         base_degree: usize,
         expander_parents: usize,
-        seed: [u32; 7],
+        seed: [u8; 28],
     ) -> Graph {
         let cache = format!("g_{}mb.json", NODES * 32 / 1024 / 1024);
         if let Err(_) = metadata(&cache) {

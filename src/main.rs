@@ -5,7 +5,6 @@ use r2::{commit, file_backed_mmap_from_zeroes, graph, replicate};
 use r2::{BASE_PARENTS, EXP_PARENTS, LAYERS, NODES, REPLICA_ID_SIZE};
 use storage_proofs::drgraph::new_seed;
 use storage_proofs::hasher::{Blake2sHasher, PedersenHasher};
-use rand::{rngs::OsRng};
 
 fn main() {
     // Load the graph from memory or generate a new one

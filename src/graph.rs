@@ -1,4 +1,5 @@
-use rand::{ChaChaRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaChaRng;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::cmp;

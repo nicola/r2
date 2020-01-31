@@ -12,11 +12,12 @@ chrono = "0.4"
 tempfile = "3"
 storage-proofs = {git = "https://github.com/filecoin-project/rust-fil-proofs/"}
 blake2s_simd = "0.5"
-paired = { version = "0.15", features = ["serde"] }
-ff = "0.4.0"
+paired = { version = "0.16.1", features = ["serde"] }
+ff = "=0.5.0"
 hex = "0.3.2"
-rand = "0.4"
+rand = "0.7"
+rand_chacha = "0.2.1"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"]}
-merkletree = "0.11"
+merkletree = "0.14.0"
 rayon = "1.0.0"

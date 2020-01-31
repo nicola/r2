@@ -44,9 +44,9 @@ where
             .expect("failed to convert node data to domain element")
     };
 
-    Ok(MerkleTree::from_par_iter(
+    MerkleTree::from_par_iter(
         (0..NODES).into_par_iter().map(leafs_f),
-    ))
+    )
 }
 
 pub fn columns<'a, H>(data: &'a [u8]) -> Result<MerkleTree<H::Domain, H::Function>>
@@ -61,7 +61,7 @@ where
         pedersen_md_no_padding(&rows).into()
     };
 
-    Ok(MerkleTree::from_par_iter(
+    MerkleTree::from_par_iter(
         (0..NODES).into_par_iter().map(leaf_f),
-    ))
+    )
 }

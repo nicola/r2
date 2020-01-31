@@ -2,8 +2,8 @@ use crate::commit::MerkleTree;
 use crate::NODES;
 
 // use std::marker::PhantomData;
-use storage_proofs::circuit::stacked;
-use storage_proofs::error::Result;
+// use storage_proofs::circuit::stacked;
+// use storage_proofs::error::Result;
 use storage_proofs::hasher::{Domain, Hasher};
 
 pub type MerklePath = Vec<u8>;
@@ -37,9 +37,9 @@ pub fn witness<'a, H: Hasher>(
     let challenge = pub_inputs.challenge % NODES;
 
     Witness {
-        openings_d: priv_inputs.tree_d.gen_proof(challenge).lemma().to_vec(),
-        openings_c: priv_inputs.tree_c.gen_proof(challenge).lemma().to_vec(),
-        openings_rl: priv_inputs.tree_rl.gen_proof(challenge).lemma().to_vec(),
+        openings_d: priv_inputs.tree_d.gen_proof(challenge).unwrap().lemma().to_vec(),
+        openings_c: priv_inputs.tree_c.gen_proof(challenge).unwrap().lemma().to_vec(),
+        openings_rl: priv_inputs.tree_rl.gen_proof(challenge).unwrap().lemma().to_vec(),
         comm_c: priv_inputs.tree_c.root(),
         comm_rl: priv_inputs.tree_rl.root(),
     }

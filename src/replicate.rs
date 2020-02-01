@@ -2,14 +2,15 @@ use ff::Field;
 use ff::PrimeField;
 use paired::bls12_381::Fr;
 
-use blake2s_simd::Params as Blake2s;
+// use blake2s_simd::Params as Blake2s;
 use storage_proofs::error::Result;
 use storage_proofs::fr32::bytes_into_fr_repr_safe;
 use storage_proofs::hasher::Domain;
 use storage_proofs::hasher::Hasher;
+use sha2::{Digest, Sha256};
 
 use crate::{data_at_node, data_at_node_offset, graph};
-use crate::{LAYERS, NODES, NODE_SIZE};
+use crate::{LAYERS, NODES};
 
 /// Generates an SDR replicated sector
 pub fn r2<'a, H>(replica_id: &'a [u8], data: &'a [u8], stack: &'a mut [u8], g: &'a graph::Graph)
@@ -50,8 +51,8 @@ where
     let mut parents = vec![0; graph.degree()];
 
     // Precompute first part of the hash used to hash the parents
-    let mut base_hasher = Blake2s::new().hash_length(NODE_SIZE).to_state();
-    base_hasher.update(replica_id.as_ref());
+    let mut base_hasher = Sha256::new();
+    base_hasher.input(AsRef::<[u8]>::as_ref(replica_id));
 
     // On layer 0, only use DRG parents
     let get_parents = if layer == 0 {
@@ -67,13 +68,12 @@ where
         // Compute `label` from `parents`
         let mut hasher = base_hasher.clone();
         // prefix it with node id
-        let node_arr = (node as u64).to_le_bytes();
-        hasher.update(&node_arr);
+        hasher.input(&(node as u64).to_be_bytes());
 
         for parent in parents.iter() {
-            hasher.update(data_at_node(&data, layer, *parent));
+            hasher.input(data_at_node(&data, layer, *parent));
         }
-        let label = hasher.finalize();
+        let label = hasher.result();
 
         // Store the `encoded` label
         let (start, end) = data_at_node_offset(layer, node);

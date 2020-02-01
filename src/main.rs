@@ -1,10 +1,10 @@
 extern crate r2;
-
-use blake2s_simd::Params as Blake2s;
+use sha2::{Digest, Sha256};
 use r2::{commit, file_backed_mmap_from_zeroes, graph, replicate};
 use r2::{BASE_PARENTS, EXP_PARENTS, LAYERS, NODES, REPLICA_ID_SIZE};
 use storage_proofs::drgraph::new_seed;
-use storage_proofs::hasher::{Blake2sHasher, PedersenHasher};
+use storage_proofs::fr32::trim_bytes_to_fr_safe;
+use storage_proofs::hasher::{PedersenHasher, Sha256Hasher};
 
 fn main() {
     // Load the graph from memory or generate a new one
@@ -13,25 +13,29 @@ fn main() {
     // Generate a file full of zeroes to be replicated
     println!("Generating CommD");
     let mut original_data = file_backed_mmap_from_zeroes(NODES, 1, false, "data");
-    let tree_d = commit::single::<PedersenHasher>(&mut original_data, 0).expect("fail to commD");
+    let tree_d = commit::single::<Sha256Hasher>(&mut original_data, 0).expect("fail to commD");
     let comm_d = tree_d.root();
     println!("CommD is: {:02x?}", &comm_d);
 
     // Compute replica_id
     println!("Generating ReplicaId");
-    let mut replica_id_hasher = Blake2s::new().hash_length(REPLICA_ID_SIZE).to_state();
     let miner_id = hex::decode("0000").expect("invalid hex for minerId");
-    let seed = hex::decode("0000").expect("invalid hex for seed");
-    replica_id_hasher.update(miner_id.as_ref());
-    replica_id_hasher.update(comm_d.as_ref());
-    replica_id_hasher.update(seed.as_ref());
-    let replica_id = replica_id_hasher.finalize();
+    let ticket = hex::decode("0000").expect("invalid hex for seed");
+    let sector_id = 1 as u64;
+    let replica_id_hash = Sha256::new()
+        .chain(miner_id)
+        .chain(&sector_id.to_be_bytes()[..])
+        .chain(ticket)
+        .chain(AsRef::<[u8]>::as_ref(&comm_d))
+        .result();
+    let replica_id = trim_bytes_to_fr_safe(replica_id_hash.as_ref()).unwrap();
+
     println!("ReplicaId is: {:02x?}", &replica_id);
 
     // Start replication
     println!("Starting replication");
     let mut stack = file_backed_mmap_from_zeroes(NODES, LAYERS, false, "stack");
-    replicate::r2::<Blake2sHasher>(replica_id.as_ref(), &original_data, &mut stack, &gg);
+    replicate::r2::<Sha256Hasher>(&replica_id, &original_data, &mut stack, &gg);
 
     println!("Generating CommR");
     let (comm_r, _tree_rl, _tree_c) = commit::commit::<PedersenHasher>(&stack);

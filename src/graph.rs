@@ -8,6 +8,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::Write;
 use storage_proofs::crypto::feistel;
+use rayon::prelude::*;
 
 use crate::{BASE_PARENTS, NODES, PARENT_SIZE};
 
@@ -131,6 +132,7 @@ impl Graph {
             let mut f = File::create(&cache).expect("Unable to create file");
             let j = serde_json::to_string(&gg).expect("unable to create json");
             write!(f, "{}\n", j).expect("Unable to write file");
+            println!("Parents are now cached");
 
             gg
         } else {
@@ -175,10 +177,19 @@ impl Graph {
         let fp = feistel::precompute((self.expansion_degree * self.nodes) as feistel::Index);
 
         // Cache only forward DRG and Expander parents
-        for node in 0..self.nodes {
-            self.bas[node] = bucketsample_parents(&self, node);
-            self.exp[node] = expander_parents(&self, node, fp);
-        }
+        self.bas = (0..self.nodes)
+            .into_par_iter()
+            .map(|node| {
+                bucketsample_parents(&self, node)
+            })
+            .collect();
+
+        self.exp = (0..self.nodes)
+            .into_par_iter()
+            .map(|node| {
+                expander_parents(&self, node, fp)
+            })
+            .collect()
     }
 
     pub fn degree(&self) -> usize {

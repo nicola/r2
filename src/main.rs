@@ -1,7 +1,7 @@
 extern crate r2;
 use sha2::{Digest, Sha256};
 use r2::{commit, file_backed_mmap_from_zeroes, graph, replicate};
-use r2::{BASE_PARENTS, EXP_PARENTS, LAYERS, NODES, REPLICA_ID_SIZE};
+use r2::{BASE_PARENTS, EXP_PARENTS, LAYERS, NODES};
 use storage_proofs::drgraph::new_seed;
 use storage_proofs::fr32::trim_bytes_to_fr_safe;
 use storage_proofs::hasher::{PedersenHasher, Sha256Hasher};

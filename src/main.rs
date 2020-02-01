@@ -6,27 +6,28 @@ use storage_proofs::drgraph::new_seed;
 use storage_proofs::fr32::trim_bytes_to_fr_safe;
 use storage_proofs::hasher::{PedersenHasher, Sha256Hasher};
 use std::thread;
+use std::sync::Arc;
 
 fn main() {
     // Load the graph from memory or generate a new one
-    let gg = graph::Graph::new_cached(NODES, BASE_PARENTS, EXP_PARENTS, new_seed());
-
-    // Generate a file full of zeroes to be replicated
-    println!("Generating CommD");
-    let mut original_data = file_backed_mmap_from_zeroes(NODES, 1, false, "data");
-    let tree_d = commit::single::<Sha256Hasher>(&mut original_data, 0).expect("fail to commD");
-    let comm_d = tree_d.root();
-    println!("CommD is: {:02x?}", &comm_d);
-
-    // Compute replica_id
-    println!("Generating ReplicaId");
-    let miner_id = hex::decode("0000").expect("invalid hex for minerId");
-    let ticket = hex::decode("0000").expect("invalid hex for seed");
+    let gg = Arc::new(graph::Graph::new_cached(NODES, BASE_PARENTS, EXP_PARENTS, new_seed()));
 
     let mut children = vec![];
 
     for i in 0..6 {
+        let gg = gg.clone();
         let handle = thread::spawn(move || {
+            println!("Generating CommD");
+            // Generate a file full of zeroes to be replicated
+            let mut original_data = file_backed_mmap_from_zeroes(NODES, 1, false, "data");
+            let tree_d = commit::single::<Sha256Hasher>(&mut original_data, 0).expect("fail to commD");
+            let comm_d = tree_d.root();
+            println!("CommD is: {:02x?}", &comm_d);
+
+            // Compute replica_id
+            println!("Generating ReplicaId");
+            let miner_id = hex::decode("0000").expect("invalid hex for minerId");
+            let ticket = hex::decode("0000").expect("invalid hex for seed");
             let sector_id = i as u64;
             let replica_id_hash = Sha256::new()
                 .chain(&miner_id)

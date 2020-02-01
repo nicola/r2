@@ -5,6 +5,7 @@ use r2::{BASE_PARENTS, EXP_PARENTS, LAYERS, NODES, REPLICA_ID_SIZE};
 use storage_proofs::drgraph::new_seed;
 use storage_proofs::fr32::trim_bytes_to_fr_safe;
 use storage_proofs::hasher::{PedersenHasher, Sha256Hasher};
+use std::thread;
 
 fn main() {
     // Load the graph from memory or generate a new one
@@ -21,24 +22,39 @@ fn main() {
     println!("Generating ReplicaId");
     let miner_id = hex::decode("0000").expect("invalid hex for minerId");
     let ticket = hex::decode("0000").expect("invalid hex for seed");
-    let sector_id = 1 as u64;
-    let replica_id_hash = Sha256::new()
-        .chain(miner_id)
-        .chain(&sector_id.to_be_bytes()[..])
-        .chain(ticket)
-        .chain(AsRef::<[u8]>::as_ref(&comm_d))
-        .result();
-    let replica_id = trim_bytes_to_fr_safe(replica_id_hash.as_ref()).unwrap();
 
-    println!("ReplicaId is: {:02x?}", &replica_id);
+    let mut children = vec![];
 
-    // Start replication
-    println!("Starting replication");
-    let mut stack = file_backed_mmap_from_zeroes(NODES, LAYERS, false, "stack");
-    replicate::r2::<Sha256Hasher>(&replica_id, &original_data, &mut stack, &gg);
+    for i in 0..6 {
+        let handle = thread::spawn(move || {
+            let sector_id = i as u64;
+            let replica_id_hash = Sha256::new()
+                .chain(&miner_id)
+                .chain(&sector_id.to_be_bytes()[..])
+                .chain(ticket)
+                .chain(AsRef::<[u8]>::as_ref(&comm_d))
+                .result();
+            let replica_id = trim_bytes_to_fr_safe(replica_id_hash.as_ref()).unwrap();
 
-    println!("Generating CommR");
-    let (comm_r, _tree_rl, _tree_c) = commit::commit::<PedersenHasher>(&stack);
+            println!("ReplicaId is: {:02x?}", &replica_id);
 
-    println!("CommR is: {:02x?}", &comm_r)
+            // Start replication
+            println!("Starting replication");
+            let mut stack = file_backed_mmap_from_zeroes(NODES, LAYERS, false, "stack");
+            replicate::r2::<Sha256Hasher>(&replica_id, &original_data, &mut stack, &gg);
+
+            println!("Generating CommR");
+            let (comm_r, _tree_rl, _tree_c) = commit::commit::<PedersenHasher>(&stack);
+
+            println!("CommR is: {:02x?}", &comm_r)
+        });
+        children.push(handle);
+    }
+
+    for child in children {
+        // Wait for the thread to finish. Returns a result.
+        let _ = child.join();
+    }
+
+    println!("Done");
 }
